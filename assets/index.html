@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teco</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root{
+  --bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mute:#5d6672;--line:#e3e6ea;--bar:#e9ecef;
+  --ok:#1f8a4c;--ok-bg:#e5f5ec;--warn:#a86b00;--warn-bg:#fff4d9;--bad:#c62828;--bad-bg:#fde8e8;
+  --accent:#3a5bd9;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1216;--card:#171b21;--ink:#e8eaed;--mute:#98a2ae;--line:#262c34;--bar:#232931;
+  --ok:#4cc480;--ok-bg:#12291d;--warn:#f0b43c;--warn-bg:#2d2310;--bad:#ff6b6b;--bad-bg:#341617;
+  --accent:#8aa2ff;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:1100px;margin:0 auto;padding:16px}
+header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+header svg{width:28px;height:28px;flex:none}
+header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+header .host{color:var(--mute);font-size:13px;margin-left:auto;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.hero{display:grid;grid-template-columns:minmax(200px,1fr) 2fr;gap:20px;align-items:center}
+.status{display:flex;align-items:center;gap:12px}
+.dot{width:18px;height:18px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 6px var(--ok-bg);flex:none}
+.status b{font-size:34px;line-height:1.1;font-weight:700;display:block}
+.status small{color:var(--mute);display:block}
+.s-watch .dot{background:var(--warn);box-shadow:0 0 0 6px var(--warn-bg)}
+.s-alert .dot{background:var(--bad);box-shadow:0 0 0 6px var(--bad-bg);animation:pulse 1.6s ease-in-out infinite}
+.s-ok b{color:var(--ok)}.s-watch b{color:var(--warn)}.s-alert b{color:var(--bad)}
+@keyframes pulse{50%{box-shadow:0 0 0 10px var(--bad-bg)}}
+@media (prefers-reduced-motion:reduce){.s-alert .dot{animation:none}}
+.bars{display:grid;gap:10px}
+.bar{display:grid;grid-template-columns:52px 1fr 150px;gap:10px;align-items:center;font-variant-numeric:tabular-nums}
+.bar span:first-child{color:var(--mute);font-weight:600}
+.bar span:last-child{text-align:right;color:var(--mute);font-size:13px}
+.track{position:relative;height:10px;border-radius:6px;background:var(--bar);overflow:hidden}
+.fill{height:100%;width:0;border-radius:6px;background:var(--ok);transition:width .4s}
+.fill.warn{background:var(--warn)}.fill.bad{background:var(--bad)}
+.lim{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--mute);opacity:.55}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mute);margin:0 0 10px;font-weight:650;display:flex;align-items:center;gap:8px}
+h2 .n{background:var(--bar);color:var(--ink);border-radius:10px;padding:0 7px;font-size:12px;letter-spacing:0}
+.alerts{display:grid;gap:8px}
+.alert{display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;align-items:center;border-radius:10px;padding:10px 12px;border:1px solid var(--line)}
+.alert.fired{background:var(--bad-bg);border-color:transparent}
+.alert.recovering,.alert.pending,.alert.near{background:var(--warn-bg);border-color:transparent}
+.alert .tag{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;border-radius:6px;padding:2px 7px;color:#fff;background:var(--bad)}
+.alert:not(.fired) .tag{background:var(--warn);color:#1b1f24}
+.alert .what{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.alert .what em{font-style:normal;color:var(--mute);font-weight:400}
+.alert .val{font-variant-numeric:tabular-nums;font-weight:650;text-align:right;white-space:nowrap}
+.alert .meta{grid-column:2/4;color:var(--mute);font-size:13px}
+.empty{color:var(--mute);padding:4px 0}
+.tools{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.tools h2{margin:0 auto 0 0}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;color:var(--mute);padding:6px 12px;font:inherit;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--card)}
+input[type=search]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 10px;width:220px;max-width:100%}
+input[type=search]:focus,.seg button:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--mute);font-weight:600;font-size:12px}
+td.num,th.num{text-align:right}
+td.cmd{color:var(--mute);max-width:380px;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
+tr.near td{background:var(--warn-bg)}tr.over td{background:var(--bad-bg)}
+tr.near td:first-child{box-shadow:inset 3px 0 var(--warn)}tr.over td:first-child{box-shadow:inset 3px 0 var(--bad)}
+.kill{font:inherit;font-size:12px;border:1px solid var(--line);background:transparent;color:var(--bad);border-radius:6px;padding:3px 9px;cursor:pointer}
+.kill:hover{background:var(--bad-bg)}.kill:disabled{color:var(--mute);cursor:not-allowed;background:none}
+.events{list-style:none;margin:0;padding:0;max-height:360px;overflow:auto}
+.events li{display:grid;grid-template-columns:62px 82px 1fr;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.events time{color:var(--mute);font-variant-numeric:tabular-nums}
+.k{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--mute)}
+.k-alert,.k-kill,.k-error{color:var(--bad)}.k-resolved{color:var(--ok)}
+.events b{font-weight:600}
+footer{color:var(--mute);font-size:12px;text-align:center;padding:8px 0 20px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--card);padding:10px 14px;border-radius:10px;max-width:calc(100% - 32px);display:none}
+.stale .hero,.stale .alerts{opacity:.55}
+@media (max-width:720px){
+  .hero{grid-template-columns:1fr}
+  .bar{grid-template-columns:44px 1fr 110px}
+  .status b{font-size:28px}
+  td.cmd,th.cmd{display:none}
+  input[type=search]{width:100%}
+  .alert{grid-template-columns:auto 1fr}.alert .what{white-space:normal}.alert .val{grid-column:2;text-align:left}.alert .meta{grid-column:1/3}
+  .events li{grid-template-columns:52px 1fr}.events li .k{display:none}
+}
+</style>
+</head>
+<body>
+<main id="app">
+  <header>
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1.5 .8 5 3.6h6L14.5.8V9c0 3.6-2.9 6.2-6.5 6.2S1.5 12.6 1.5 9ZM5.4 4.9a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Zm5.2 0a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2ZM5.6 6.3a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Zm4.8 0a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2ZM7.1 10.6h1.8L8 12.2Z"/></svg>
+    <h1>Teco</h1>
+    <div class="host" id="host">conectando…</div>
+  </header>
+
+  <section class="card hero" aria-live="polite">
+    <div class="status s-ok" id="status">
+      <div class="dot"></div>
+      <div><b id="statusText">…</b><small id="statusSub"></small></div>
+    </div>
+    <div class="bars">
+      <div class="bar"><span>CPU</span><div class="track"><div class="fill" id="cpuFill"></div><div class="lim" id="cpuLim"></div></div><span id="cpuTxt"></span></div>
+      <div class="bar"><span>RAM</span><div class="track"><div class="fill" id="memFill"></div><div class="lim" id="memLim"></div></div><span id="memTxt"></span></div>
+      <div class="bar"><span>Swap</span><div class="track"><div class="fill" id="swapFill"></div><div class="lim" id="swapLim"></div></div><span id="swapTxt"></span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Alertas activas <span class="n" id="alertN">0</span></h2>
+    <div class="alerts" id="alerts"></div>
+  </section>
+
+  <section class="card">
+    <div class="tools">
+      <h2>Procesos más pesados <span class="n" id="procN">0</span></h2>
+      <div class="seg" role="group" aria-label="Ordenar por">
+        <button id="byMem" aria-pressed="true">RAM</button><button id="byCpu" aria-pressed="false">CPU</button>
+      </div>
+      <input type="search" id="q" placeholder="Filtrar (nombre, comando o PID)" aria-label="Filtrar procesos">
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Proceso</th><th class="num">PID</th><th class="num">CPU</th><th class="num">RAM</th><th class="num">Vivo</th><th class="cmd">Comando</th><th id="killTh"></th></tr></thead>
+        <tbody id="procs"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Historial</h2>
+    <ul class="events" id="events"></ul>
+  </section>
+  <footer id="foot"></footer>
+</main>
+<div class="toast" id="toast" role="status"></div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const st = {sort: "mem", q: "", timer: 0, interval: 2000, last: null, busy: false};
+try { st.sort = localStorage.getItem("teco.sort") || "mem"; } catch (e) {}
+
+const GB = 1073741824, MB = 1048576;
+const fmtB = b => b >= GB ? (b / GB).toFixed(1) + " GB" : Math.round(b / MB) + " MB";
+const fmtDur = s => s < 60 ? Math.round(s) + " s" : s < 3600 ? Math.floor(s / 60) + " min"
+  : s < 86400 ? Math.floor(s / 3600) + " h " + Math.floor(s % 3600 / 60) + " min"
+  : Math.floor(s / 86400) + " d " + Math.floor(s % 86400 / 3600) + " h";
+const ago = (ms, now) => ms ? "hace " + fmtDur(Math.max(0, (now - ms) / 1000)) : "";
+const hhmm = ms => new Date(ms).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function bar(id, pct, lim, txt) {
+  const f = $(id + "Fill"), l = $(id + "Lim");
+  const p = Math.max(0, Math.min(100, pct));
+  f.style.width = p + "%";
+  const ratio = lim > 0 ? pct / lim : pct / 100;
+  f.className = "fill" + (ratio >= 1 ? " bad" : ratio >= 0.8 ? " warn" : "");
+  l.style.display = lim > 0 && lim <= 100 ? "" : "none";
+  l.style.left = "calc(" + Math.min(lim, 100) + "% - 1px)";
+  $(id + "Txt").textContent = txt;
+}
+
+const LABEL = {fired: "Alerta", recovering: "Bajando", pending: "Se está pasando", near: "Cerca"};
+
+function render(d) {
+  st.last = d;
+  st.interval = Math.max(1000, d.interval * 1000);
+  document.body.classList.remove("stale");
+  const now = d.now;
+  const s = d.sys;
+  $("host").textContent = (d.host || "") + " · " + d.proc_count + " procesos · " + s.cores + " núcleos";
+
+  const fired = d.alerts.filter(a => a.state === "fired" || a.state === "recovering");
+  const text = {ok: "Tranquilo", watch: "Atento", alert: "Alerta"}[d.status];
+  $("status").className = "status s-" + d.status;
+  $("statusText").textContent = text;
+  $("statusSub").textContent = d.status === "alert" ? fired.length + (fired.length === 1 ? " regla disparada" : " reglas disparadas")
+    : d.status === "watch" ? "algo va arriba del 80 % de su límite" : "nada se pasa de la raya";
+  document.title = (d.status === "ok" ? "" : (d.status === "alert" ? "🔴 " : "🟡 ")) + "Teco · " + text;
+
+  bar("cpu", s.cpu, s.lim_cpu, s.cpu.toFixed(0) + " %");
+  const memPct = s.mem_total ? s.mem_used * 100 / s.mem_total : 0;
+  bar("mem", memPct, s.lim_mem, fmtB(s.mem_used) + " / " + fmtB(s.mem_total));
+  const swapPct = s.swap_total ? s.swap_used * 100 / s.swap_total : 0;
+  const swapLimPct = s.swap_total && s.lim_swap_gb ? s.lim_swap_gb * GB * 100 / s.swap_total : 0;
+  bar("swap", swapPct, swapLimPct, s.swap_total ? fmtB(s.swap_used) + " / " + fmtB(s.swap_total) : "sin swap");
+
+  // Alertas
+  $("alertN").textContent = fired.length;
+  $("alerts").innerHTML = d.alerts.length ? d.alerts.map(a => {
+    const who = a.sys ? "Sistema" : esc(a.name) + " <em>(" + a.pid + ")</em>";
+    const extra = [];
+    if (!a.sys && a.metric !== "mem") extra.push(fmtB(a.mem));
+    if (a.members > 1) extra.push(a.members + " procesos");
+    const when = a.state === "fired" || a.state === "recovering" ? "disparada " + ago(a.fired_at, now) + " · arriba desde " + ago(a.since, now)
+      : a.state === "pending" ? "arriba del límite " + ago(a.since, now) : Math.round(a.ratio * 100) + " % del límite";
+    return '<div class="alert ' + a.state + '"><span class="tag">' + LABEL[a.state] + '</span>'
+      + '<span class="what">' + esc(a.rule) + ' · ' + who + '</span>'
+      + '<span class="val">' + esc(a.value_txt) + ' <em style="font-weight:400;color:var(--mute)">/ ' + esc(a.limit_txt) + '</em></span>'
+      + '<span class="meta">' + [when].concat(extra).join(" · ") + '</span></div>';
+  }).join("") : '<div class="empty">Sin alertas. El tecolote está tranquilo.</div>';
+
+  // Procesos
+  $("procN").textContent = d.q ? d.matched : d.procs.length;
+  $("procs").innerHTML = d.procs.map(p => {
+    const cls = p.heat >= 1 ? "over" : p.heat >= 0.8 ? "near" : "";
+    let kill = "";
+    if (d.allow_kill) kill = p.locked ? '<button class="kill" disabled title="' + esc(p.locked) + '">Terminar</button>'
+      : '<button class="kill" data-pid="' + p.pid + '" data-start="' + p.start + '" data-name="' + esc(p.name) + '">Terminar</button>';
+    return '<tr class="' + cls + '"><td>' + esc(p.name) + '</td><td class="num">' + p.pid + '</td>'
+      + '<td class="num">' + p.cpu.toFixed(1) + ' %</td><td class="num">' + fmtB(p.mem) + '</td>'
+      + '<td class="num">' + fmtDur(p.runtime) + '</td><td class="cmd" title="' + esc(p.cmd) + '">' + esc(p.cmd) + '</td>'
+      + '<td>' + kill + '</td></tr>';
+  }).join("") || '<tr><td colspan="7" class="empty">Nada coincide.</td></tr>';
+
+  // Historial
+  $("events").innerHTML = d.events.length ? d.events.map(e =>
+    '<li><time title="' + new Date(e.ts).toLocaleString() + '">' + hhmm(e.ts) + '</time><span class="k k-' + e.kind + '">'
+    + ({alert: "alerta", kill: "terminado", resolved: "resuelto", info: "info", error: "error"}[e.kind] || e.kind)
+    + '</span><span><b>' + esc(e.title) + '</b> — ' + esc(e.text) + '</span></li>').join("")
+    : '<li><span></span><span></span><span class="empty">Sin eventos todavía.</span></li>';
+
+  $("foot").textContent = "teco " + d.version + " · pid " + d.self.pid + " · " + fmtB(d.self.mem) + " · "
+    + d.self.cpu.toFixed(1) + " % CPU · despierto " + fmtDur(d.self.uptime);
+}
+
+async function poll() {
+  clearTimeout(st.timer);
+  if (document.visibilityState !== "visible") return; // pestaña oculta: no se pide nada
+  if (!st.busy) {
+    st.busy = true;
+    try {
+      const r = await fetch("/api/state?sort=" + st.sort + "&q=" + encodeURIComponent(st.q), {cache: "no-store"});
+      if (!r.ok) throw new Error(r.status);
+      const d = await r.json();
+      d.q = st.q;
+      render(d);
+    } catch (e) {
+      document.body.classList.add("stale");
+      $("host").textContent = "sin conexión con teco…";
+    } finally { st.busy = false; }
+  }
+  st.timer = setTimeout(poll, st.interval);
+}
+
+function setSort(s) {
+  st.sort = s;
+  try { localStorage.setItem("teco.sort", s); } catch (e) {}
+  $("byMem").setAttribute("aria-pressed", s === "mem");
+  $("byCpu").setAttribute("aria-pressed", s === "cpu");
+  poll();
+}
+$("byMem").onclick = () => setSort("mem");
+$("byCpu").onclick = () => setSort("cpu");
+let qt = 0;
+$("q").addEventListener("input", e => { clearTimeout(qt); qt = setTimeout(() => { st.q = e.target.value; poll(); }, 200); });
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 4000);
+}
+$("procs").addEventListener("click", async e => {
+  const b = e.target.closest("button.kill");
+  if (!b || b.disabled) return;
+  if (!confirm("¿Terminar " + b.dataset.name + " (" + b.dataset.pid + ")?")) return;
+  b.disabled = true;
+  try {
+    const r = await fetch("/api/kill", {method: "POST", headers: {"X-Teco": "1", "Content-Type": "application/x-www-form-urlencoded"},
+      body: "pid=" + b.dataset.pid + "&start=" + b.dataset.start});
+    toast(await r.text());
+  } catch (err) { toast("No se pudo: " + err); }
+  poll();
+});
+
+document.addEventListener("visibilitychange", poll);
+setSort(st.sort);
+</script>
+</body>
+</html>

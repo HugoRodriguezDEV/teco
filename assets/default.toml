@@ -1,0 +1,39 @@
+# Teco 🦉 — reglas del vigilante.
+# Este archivo se recarga solo cuando lo guardas (bind requiere reiniciar).
+
+bind = "127.0.0.1:7777"
+interval_secs = 2
+allow_kill_from_panel = false
+notifications = true
+# webhook_url = "https://ntfy.sh/mi-tema"   # requiere compilar con --features webhook
+protected = ["kernel_task", "launchd", "WindowServer", "loginwindow",
+             "System", "Registry", "smss.exe", "csrss.exe", "wininit.exe",
+             "winlogon.exe", "services.exe", "lsass.exe", "explorer.exe",
+             "tailscaled", "tailscaled.exe"]
+
+[system]
+max_mem_percent = 90      # RAM total del equipo
+max_swap_gb = 8
+max_cpu_percent = 95      # CPU global sostenida
+for_secs = 60
+
+[[rule]]
+name = "Proceso gigante"
+match = "*"               # "*" = cualquiera; si no, substring sin mayúsculas en nombre o comando
+max_mem_gb = 4
+for_secs = 60
+action = "alert"          # "alert" | "kill"
+
+[[rule]]
+name = "Vitest colgado"
+match = "vitest"
+include_children = true   # suma RAM y CPU de todo el árbol de procesos (padre + workers)
+max_runtime_min = 40
+action = "alert"
+
+[[rule]]
+name = "CPU pegada al 100"
+match = "*"
+max_cpu_percent = 100     # por proceso; sysinfo puede pasar de 100 en multinúcleo
+for_secs = 300
+action = "alert"
