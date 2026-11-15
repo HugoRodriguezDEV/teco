@@ -19,7 +19,7 @@
 
 ## 3. Panel
 
-- [ ] 3.1 Exigir `viewer` en `/api/state` y `admin` en `/api/kill` con autenticación activa, con excepción para Host loopback, y registrar el correo en eventos de terminación; verificar con pruebas de servidor (401, 403, 200 por rol y desde localhost)
+- [ ] 3.1 Exigir `viewer` en `/api/state` y `admin` en `/api/kill` con autenticación activa, con excepción solo para el listener local `bind` (nunca por `Host`), agregar `bind_tailnet`, y registrar el correo en eventos de terminación; verificar con pruebas de servidor (401, 403, 200 por rol, desde `bind`, y 401 con `Host: localhost` falso por `bind_tailnet`)
 - [ ] 3.2 Implementar en `index.html` el flujo PKCE (Entrar con Google, canje del código, `sessionStorage`, renovación, salir) sin recursos externos; verificar con Playwright contra un emisor de prueba y revisando que la CSP no se relaja salvo `connect-src` al proyecto
 - [ ] 3.3 Ocultar el botón Terminar para `viewer` y mostrar acceso denegado sin rol; verificar con capturas por rol
 - [ ] 3.4 Documentar la sección `[auth]` y el flujo en `README.md`; verificar siguiendo la guía en la Mac

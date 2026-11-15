@@ -10,7 +10,7 @@
 - [ ] 2.1 Crear `deploy/install.sh` parametrizado (app, binario, puerto local, puerto HTTPS, etiquetas, hostname) con `set -euo pipefail`; verificar con `shellcheck deploy/install.sh` sin errores
 - [ ] 2.2 Instalar Tailscale con `brew` si falta y fallar con instrucciones si no hay `brew`; verificar corriendo dos veces sin reinstalar
 - [ ] 2.3 Unir el nodo con `TS_OAUTH_SECRET` o el archivo local solo si no hay sesión, y no tocar una sesión de usuario existente; verificar en la Mac de Hugo que sigue a su nombre tras correr el script
-- [ ] 2.4 Configurar `tailscale serve` HTTPS hacia `127.0.0.1:<puerto>` de forma idempotente; verificar con `tailscale serve status` y abriendo el nombre `.ts.net` desde otro nodo
+- [ ] 2.4 Configurar `tailscale serve` HTTPS hacia `127.0.0.1:<puerto-tailnet>` (Teco: 7778, nunca 7777) de forma idempotente; verificar con `tailscale serve status` y abriendo el nombre `.ts.net` desde otro nodo
 - [ ] 2.5 Instalar el binario, crear `teco.toml` solo si no existe y registrar el LaunchAgent; verificar con `launchctl list | grep dev.hugorodriguez.teco` y matando el proceso para ver que reinicia
 
 ## 3. Instalador de Windows

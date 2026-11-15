@@ -42,11 +42,15 @@ Teco SHALL leer el rol del usuario para la app configurada desde el token: `view
 - **THEN** el panel de Teco responde 403 con un mensaje de acceso denegado
 
 ### Requirement: Respaldo local
-Las peticiones cuyo `Host` es loopback (`localhost`, `127.0.0.1`, `::1`) SHALL atenderse sin token y con permisos de `admin`, para que el panel funcione sin internet desde la propia máquina.
+Con autenticación activa Teco SHALL escuchar en dos direcciones de loopback distintas: `bind` (local) y `bind_tailnet` (destino de `tailscale serve`). Las peticiones recibidas por `bind` SHALL atenderse sin token y con permisos de `admin`. Las recibidas por `bind_tailnet` MUST exigir token válido sin importar la cabecera `Host`. Teco MUST NOT arrancar si ambas direcciones coinciden.
 
 #### Scenario: Sin internet en la MSI
 - **WHEN** la MSI pierde internet y alguien abre `http://127.0.0.1:7777` en ella
 - **THEN** el panel funciona completo sin pedir login
+
+#### Scenario: Host falsificado desde la tailnet
+- **WHEN** un dispositivo de la tailnet pide `/api/kill` por el nombre `.ts.net` enviando `Host: localhost` y sin token
+- **THEN** la petición llega por `bind_tailnet` y Teco responde 401
 
 ### Requirement: Llaves públicas en caché
 Teco SHALL descargar las llaves públicas al arrancar, refrescarlas periódicamente y ante un identificador de llave desconocido (como máximo una vez por minuto), y guardar una copia local para usarla si la descarga falla.

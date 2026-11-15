@@ -2,7 +2,7 @@
 
 ## Context
 
-El panel se sirve por `tailscale serve` en un nombre HTTPS fijo (ver `add-node-bootstrap`) y Teco escucha solo en loopback, así que toda petición llega desde `127.0.0.1`. Para distinguir "localhost de verdad" de "vía tailscale serve" se usa la cabecera `Host`: los nombres `*.ts.net` son tráfico de la tailnet. Presupuesto del proyecto en `openspec/config.yaml`.
+El panel se sirve por `tailscale serve` en un nombre HTTPS fijo (ver `add-node-bootstrap`) y Teco escucha solo en loopback, así que toda petición llega desde `127.0.0.1`. Para distinguir "localhost de verdad" de "vía tailscale serve" se usa **el puerto**, no la cabecera `Host` (que la escribe el cliente y se puede falsificar): Teco abre dos listeners en loopback, `bind` (local, por defecto `127.0.0.1:7777`) y `bind_tailnet` (por defecto `127.0.0.1:7778`), y `tailscale serve` apunta solo a `bind_tailnet`. Presupuesto del proyecto en `openspec/config.yaml`.
 
 ## Goals / Non-Goals
 
@@ -27,7 +27,7 @@ El panel se sirve por `tailscale serve` en un nombre HTTPS fijo (ver `add-node-b
 
 **Sesión del panel.** Flujo PKCE manual: el panel genera `code_verifier`, redirige a `/auth/v1/authorize?provider=google&redirect_to=<panel>&code_challenge=...` y al volver canjea el código en `/auth/v1/token?grant_type=pkce` con la llave anon. Guarda access y refresh token en `sessionStorage` y envía `Authorization: Bearer` en cada fetch; renueva con el refresh token antes de expirar. Alternativa descartada: cookie HttpOnly emitida por Teco (más estado en el servidor, sin beneficio real dentro de la tailnet).
 
-**Respaldo de localhost.** Si `Host` es loopback, Teco trata la petición como `admin` sin token. Riesgo aceptado: quien ya tiene sesión en la máquina ya puede terminar procesos por otros medios.
+**Respaldo de localhost.** Las peticiones que llegan por el listener `bind` (local) se tratan como `admin` sin token; las que llegan por `bind_tailnet` SIEMPRE exigen token, sin importar su cabecera `Host`. Así un usuario de la tailnet no puede hacerse pasar por local mandando `Host: localhost`. Riesgo aceptado: quien ya tiene sesión en la máquina ya puede terminar procesos por otros medios.
 
 **`teco login` y `devices`.** `teco login` levanta un puerto efímero en loopback, abre el navegador con PKCE y recibe el código ahí. Con el access token inserta o actualiza su fila en `devices(id, user_id, app, hostname, tailnet_name, os, version, last_seen)` con RLS `user_id = auth.uid()`. Guarda el refresh token en la carpeta de config con permisos de usuario y actualiza `last_seen` como máximo cada hora. Nunca guarda la llave de servicio.
 
@@ -47,7 +47,7 @@ Sin sección `[auth]`, Teco se comporta como hoy.
 - [Sin internet al arrancar no hay JWKS] → se guarda una copia del JWKS en disco y se usa si la descarga falla; localhost siempre funciona.
 - [Un rol revocado sigue válido hasta que expira el token] → vida del access token de 1 h (default de Supabase); aceptado.
 - [Llave anon y URL en `teco.toml`] → son públicas por diseño; las protecciones reales son RLS y la lista de acceso.
-- [La cabecera Host decide si es localhost] → Teco solo escucha en loopback, así que solo `tailscale serve` o la propia máquina pueden enviar peticiones; un `Host` falso desde la propia máquina equivale a acceso local.
+- [Confundir tráfico de la tailnet con local] → la decisión es por listener (puerto), nunca por `Host`; `tailscale serve` solo conoce `bind_tailnet`. Si `bind` y `bind_tailnet` coinciden, Teco se niega a arrancar con `[auth]` activo.
 
 ## Migration Plan
 
