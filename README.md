@@ -162,4 +162,8 @@ cargo clippy --release --all-features
 cargo run -- --config ./dev.toml
 ```
 
-La CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) compila, prueba y corre `teco bench` en macOS, Windows y Linux.
+El proyecto no usa GitHub Actions a propósito, para no gastar minutos de CI. Para verificar cada plataforma, corre esto en tu Mac y en la MSI:
+
+```bash
+cargo test --release && cargo build --release && cargo run --release -- bench
+```
