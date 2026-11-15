@@ -1,0 +1,69 @@
+schema: spec-driven
+
+context: |
+  Language: es
+  All artifacts must be written in es.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+
+  Proyecto: Teco (de "tecolote"). Guardián de recursos ultraligero escrito en Rust.
+  Corre siempre en segundo plano, casi sin consumir nada, y solo avisa cuando un
+  proceso o el equipo se pasa de un límite. No es un administrador de tareas: es un
+  detector de problemas con un panel web mínimo.
+  - Paquete de Cargo: `tecolote`. Binario: `teco`. Identificador: `dev.hugorodriguez.teco`.
+  - Dueño: Hugo (único administrador por ahora).
+
+  Presupuesto obligatorio (build release, muestreo cada 2 s), se mide con `teco bench`:
+  - RSS en reposo < 15 MB; CPU promedio < 0.5 % de un núcleo con el panel cerrado;
+    binario < 6 MB; arranque < 200 ms.
+  - Cualquier dependencia nueva debe justificar su costo contra este presupuesto.
+  - Sin runtime async, sin frameworks de frontend, sin CDNs: el panel es un solo
+    `index.html` vanilla embebido con `include_str!`.
+
+  Plataformas:
+  - macOS: Mac de desarrollo y estación de trabajo de Hugo (se usa con su cuenta personal).
+  - Windows: laptop MSI encendida 24/7 como nodo de agentes de IA.
+  - Linux solo se usa para desarrollo y CI.
+
+  Ecosistema:
+  - Zotz: fork de Orca, proyecto aparte (otro repositorio, no accesible desde aquí).
+    Recibe tickets y tareas de los proyectos de Qué Onda y de Tedic, y elige el
+    repositorio con un switch; más adelante tendrá un tablero. Corre en la MSI.
+  - Teco y Zotz comparten la tailnet privada de Tailscale y, a futuro, el mismo
+    proyecto de Supabase para el login de las herramientas internas.
+  - Qué Onda queda fuera: tiene su propio servicio de autenticación en un VPS y usa
+    Neon como base de datos. Teco no depende de él.
+
+  Reglas de seguridad:
+  - El repositorio es público: nunca se versionan secretos (llaves de Tailscale,
+    llaves de Supabase con privilegios, tokens). Solo valores públicos como la URL
+    del proyecto o la llave anon de Supabase.
+  - La red es privada (tailnet); el panel no se expone a internet.
+  - Terminar procesos es la acción más peligrosa: siempre detrás de protecciones
+    (propio teco, PID 0/1/4, lista `protected`, PID reciclado).
+
+  Convenciones:
+  - Código y comentarios en español; mensajes al usuario en español.
+  - Pruebas con `cargo test`; lint con `cargo clippy --release --all-features`.
+  - CI en GitHub Actions (gratis mientras el repo sea público) en macOS, Windows y Linux.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
