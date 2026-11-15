@@ -162,7 +162,9 @@ cargo clippy --release --all-features
 cargo run -- --config ./dev.toml
 ```
 
-El proyecto no usa GitHub Actions a propósito, para no gastar minutos de CI. Para verificar cada plataforma, corre esto en tu Mac y en la MSI:
+La CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) compila, prueba y corre `teco bench` en macOS, Windows y Linux. Es gratis mientras el repo sea público; si lo haces privado, consume minutos de tu cuota (macOS es el más caro).
+
+Para verificar a mano en tu Mac o en la MSI:
 
 ```bash
 cargo test --release && cargo build --release && cargo run --release -- bench
