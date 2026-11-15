@@ -28,6 +28,30 @@ pub struct Config {
     pub system: SystemLimits,
     #[serde(default, rename = "rule")]
     pub rules: Vec<Rule>,
+    /// Otros nodos con Teco que aparecen en la vista de dispositivos.
+    #[serde(default, rename = "device")]
+    pub devices: Vec<Device>,
+}
+
+/// Máximo de dispositivos en la vista (cada uno es un fetch por ciclo del panel).
+pub const MAX_DEVICES: usize = 32;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Device {
+    pub name: String,
+    /// Origen del panel del nodo, p. ej. `https://msi.tail1234.ts.net`. Se normaliza sin `/` final.
+    pub url: String,
+}
+
+/// Valida un origen `http(s)://host[:puerto]` (sin ruta) y lo devuelve sin `/` final.
+/// Va dentro de la cabecera CSP, así que no admite espacios, comillas ni `;`.
+pub fn normalize_origin(url: &str) -> Option<String> {
+    let u = url.trim().trim_end_matches('/').to_ascii_lowercase();
+    let rest = u.strip_prefix("https://").or_else(|| u.strip_prefix("http://"))?;
+    let ok = !rest.is_empty()
+        && rest.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
+    ok.then_some(u)
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -117,6 +141,14 @@ impl Config {
                 ));
             }
         }
+        if c.devices.len() > MAX_DEVICES {
+            return Err(format!("máximo {MAX_DEVICES} dispositivos (hay {})", c.devices.len()));
+        }
+        for d in &mut c.devices {
+            d.url = normalize_origin(&d.url).ok_or_else(|| {
+                format!("el dispositivo \"{}\" necesita url = \"http(s)://host[:puerto]\" sin ruta", d.name)
+            })?;
+        }
         Ok(c)
     }
 
@@ -190,6 +222,18 @@ mod tests {
     fn rule_without_limits_is_error() {
         let e = Config::parse("[[rule]]\nname='x'\nmatch='a'\n").unwrap_err();
         assert!(e.contains("no tiene límites"));
+    }
+
+    #[test]
+    fn devices() {
+        let c = Config::parse("[[device]]\nname='MSI'\nurl='HTTPS://msi.tail1.ts.net/'\n").unwrap();
+        assert_eq!(c.devices[0].url, "https://msi.tail1.ts.net");
+        assert_eq!(normalize_origin("http://127.0.0.1:7779"), Some("http://127.0.0.1:7779".into()));
+        assert_eq!(normalize_origin("http://[::1]:7779"), Some("http://[::1]:7779".into()));
+        for bad in ["msi.ts.net", "ftp://x", "https://x/equipo", "https://x; script-src *", "https://"] {
+            assert!(normalize_origin(bad).is_none(), "{bad}");
+        }
+        assert!(Config::parse("[[device]]\nname='x'\nurl='https://x/y'\n").is_err());
     }
 
     #[test]

@@ -93,9 +93,23 @@ Antes de matar, **avisa y registra el evento**. En Unix manda `SIGTERM` y, si el
 - **Historial**: los últimos 200 eventos en memoria, para el panel, más `teco-events.log` en disco.
 - **Webhook** (opcional, desactivado por defecto): compila con `cargo build --release --features webhook` y pon `webhook_url = "https://ntfy.sh/tu-tema"` en `teco.toml`. Teco hace un POST con JSON que incluye `source`, `host`, `title`, `body`, `rule`, `pid` y `action`.
 
+## Dispositivos
+
+`http://127.0.0.1:7777` abre la vista de **Dispositivos**: una tarjeta por cada nodo con Teco, con su estado (Tranquilo, Atento, Alerta o Sin conexión) y las barras de CPU, RAM y swap. Al hacer clic en una tarjeta se abre el panel de ese equipo, y "← Dispositivos" regresa.
+
+Este equipo siempre aparece primero. Los demás se agregan en `teco.toml` (se recarga en caliente):
+
+```toml
+[[device]]
+name = "MSI"
+url = "https://msi.tu-tailnet.ts.net"   # origen del panel del nodo, sin ruta
+```
+
+El navegador pide a cada nodo `GET /api/summary`, un JSON chico sin procesos ni eventos. Los nodos solo lo comparten con orígenes de loopback, `localhost`, `*.ts.net` o IPs de Tailscale (CORS). Un nodo que no responde se reintenta cada ~15 s.
+
 ## Panel
 
-Ve a `http://127.0.0.1:7777`. Muestra:
+El panel de cada equipo está en `/equipo` (`http://127.0.0.1:7777/equipo`). Muestra:
 
 - el estado general y las barras de CPU, RAM y swap, con una marca en el límite;
 - las alertas activas;

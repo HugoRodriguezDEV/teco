@@ -23,6 +23,8 @@ main{max-width:1100px;margin:0 auto;padding:16px}
 header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 header svg{width:28px;height:28px;flex:none}
 header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+header .back{color:var(--accent);text-decoration:none;font-weight:600;font-size:13px;padding:4px 8px 4px 0;white-space:nowrap}
+header .back:hover{text-decoration:underline}
 header .host{color:var(--mute);font-size:13px;margin-left:auto;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
 .hero{display:grid;grid-template-columns:minmax(200px,1fr) 2fr;gap:20px;align-items:center}
@@ -68,6 +70,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 th{color:var(--mute);font-weight:600;font-size:12px}
 td.num,th.num{text-align:right}
+td.app{font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis}td.app.via{font-weight:400;color:var(--mute)}td.app.none{color:var(--mute)}
 td.cmd{color:var(--mute);max-width:380px;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
 tr.near td{background:var(--warn-bg)}tr.over td{background:var(--bad-bg)}
 tr.near td:first-child{box-shadow:inset 3px 0 var(--warn)}tr.over td:first-child{box-shadow:inset 3px 0 var(--bad)}
@@ -96,6 +99,7 @@ footer{color:var(--mute);font-size:12px;text-align:center;padding:8px 0 20px}
 <body>
 <main id="app">
   <header>
+    <a class="back" id="back" href="/">← Dispositivos</a>
     <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1.5 .8 5 3.6h6L14.5.8V9c0 3.6-2.9 6.2-6.5 6.2S1.5 12.6 1.5 9ZM5.4 4.9a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Zm5.2 0a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2ZM5.6 6.3a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Zm4.8 0a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2ZM7.1 10.6h1.8L8 12.2Z"/></svg>
     <h1>Teco</h1>
     <div class="host" id="host">conectando…</div>
@@ -124,11 +128,11 @@ footer{color:var(--mute);font-size:12px;text-align:center;padding:8px 0 20px}
       <div class="seg" role="group" aria-label="Ordenar por">
         <button id="byMem" aria-pressed="true">RAM</button><button id="byCpu" aria-pressed="false">CPU</button>
       </div>
-      <input type="search" id="q" placeholder="Filtrar (nombre, comando o PID)" aria-label="Filtrar procesos">
+      <input type="search" id="q" placeholder="Filtrar (nombre, app, comando o PID)" aria-label="Filtrar procesos">
     </div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Proceso</th><th class="num">PID</th><th class="num">CPU</th><th class="num">RAM</th><th class="num">Vivo</th><th class="cmd">Comando</th><th id="killTh"></th></tr></thead>
+        <thead><tr><th>Proceso</th><th>App</th><th class="num">PID</th><th class="num">CPU</th><th class="num">RAM</th><th class="num">Vivo</th><th class="cmd">Comando</th><th id="killTh"></th></tr></thead>
         <tbody id="procs"></tbody>
       </table>
     </div>
@@ -144,6 +148,9 @@ footer{color:var(--mute);font-size:12px;text-align:center;padding:8px 0 20px}
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
+// Si se llegó desde la vista de dispositivos de otro nodo, "← Dispositivos" vuelve allá.
+const hub = new URLSearchParams(location.search).get("hub");
+if (hub && /^https?:\/\/[a-z0-9.:\[\]-]+$/i.test(hub)) $("back").href = hub + "/";
 const st = {sort: "mem", q: "", timer: 0, interval: 2000, last: null, busy: false};
 try { st.sort = localStorage.getItem("teco.sort") || "mem"; } catch (e) {}
 
@@ -214,11 +221,14 @@ function render(d) {
     let kill = "";
     if (d.allow_kill) kill = p.locked ? '<button class="kill" disabled title="' + esc(p.locked) + '">Terminar</button>'
       : '<button class="kill" data-pid="' + p.pid + '" data-start="' + p.start + '" data-name="' + esc(p.name) + '">Terminar</button>';
-    return '<tr class="' + cls + '"><td>' + esc(p.name) + '</td><td class="num">' + p.pid + '</td>'
+    const app = !p.app ? '<td class="app none">—</td>'
+      : p.app_via ? '<td class="app via" title="Lanzado desde ' + esc(p.app) + '">↳ ' + esc(p.app) + '</td>'
+      : '<td class="app">' + esc(p.app) + '</td>';
+    return '<tr class="' + cls + '"><td>' + esc(p.name) + '</td>' + app + '<td class="num">' + p.pid + '</td>'
       + '<td class="num">' + p.cpu.toFixed(1) + ' %</td><td class="num">' + fmtB(p.mem) + '</td>'
       + '<td class="num">' + fmtDur(p.runtime) + '</td><td class="cmd" title="' + esc(p.cmd) + '">' + esc(p.cmd) + '</td>'
       + '<td>' + kill + '</td></tr>';
-  }).join("") || '<tr><td colspan="7" class="empty">Nada coincide.</td></tr>';
+  }).join("") || '<tr><td colspan="8" class="empty">Nada coincide.</td></tr>';
 
   // Historial
   $("events").innerHTML = d.events.length ? d.events.map(e =>

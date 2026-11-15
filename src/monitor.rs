@@ -31,6 +31,8 @@ struct Meta {
     start: u64,
     name: Arc<str>,
     cmd: Arc<str>,
+    /// App dueña, sacada de la ruta del ejecutable (`/Applications/X.app/...` → "X").
+    app: Option<Arc<str>>,
     /// nombre + comando en minúsculas, para el `match` de las reglas.
     hay: Box<str>,
     mask: u64,
@@ -617,8 +619,51 @@ impl Monitor {
     }
 
     /// Snapshot JSON para el panel. Solo se llama cuando hay una petición.
+    /// App dueña de un proceso: la suya, o la del ancestro más cercano que tenga una
+    /// (p. ej. un `node` lanzado desde la terminal de VS Code). `bool` = heredada.
+    fn app_of(&self, r: &Row) -> Option<(&Arc<str>, bool)> {
+        if let Some(a) = self.cache.get(&r.pid).and_then(|m| m.app.as_ref()) {
+            return Some((a, false));
+        }
+        let mut pid = r.ppid;
+        for _ in 0..MAX_TREE_DEPTH {
+            if pid <= 1 || pid == r.pid {
+                break;
+            }
+            if let Some(a) = self.cache.get(&pid).and_then(|m| m.app.as_ref()) {
+                return Some((a, true));
+            }
+            pid = match self.idx.get(&pid) {
+                Some(&i) => self.rows[i as usize].ppid,
+                None => break,
+            };
+        }
+        None
+    }
+
+    /// Resumen para la vista de dispositivos: solo estado y métricas del sistema,
+    /// sin procesos ni eventos (es lo que otros nodos piden cada pocos segundos).
+    pub fn write_summary(&self, out: &mut String) {
+        out.clear();
+        self.write_common(out);
+        let fired = self.tracks.values().filter(|t| t.fired).count();
+        out.push_str(",\"alerts_fired\":");
+        json_num(out, fired as f64);
+        out.push_str(",\"alerts_near\":");
+        json_num(out, (self.tracks.len() - fired) as f64);
+        out.push_str(",\"os\":");
+        json_str(out, std::env::consts::OS);
+        out.push('}');
+    }
+
     pub fn write_state(&self, out: &mut String, sort: SortBy, filter: &str, limit: usize) {
         out.clear();
+        self.write_common(out);
+        self.write_rest(out, sort, filter, limit);
+    }
+
+    /// `{"version":…` hasta `"sys":{…}` (sin cerrar el objeto).
+    fn write_common(&self, out: &mut String) {
         out.push_str("{\"version\":");
         json_str(out, env!("CARGO_PKG_VERSION"));
         out.push_str(",\"host\":");
@@ -665,7 +710,9 @@ impl Monitor {
         out.push_str(",\"lim_swap_gb\":");
         json_num(out, s.max_swap_gb.unwrap_or(0.0));
         out.push('}');
+    }
 
+    fn write_rest(&self, out: &mut String, sort: SortBy, filter: &str, limit: usize) {
         // Alertas activas y cosas "por pasarse".
         let mut tracks: Vec<(&Key, &Track)> = self.tracks.iter().collect();
         tracks.sort_by(|a, b| {
@@ -730,6 +777,7 @@ impl Monitor {
                     let pid_match = r.pid.to_string() == needle;
                     pid_match
                         || self.cache.get(&r.pid).map(|m| m.hay.contains(needle.as_str())).unwrap_or(false)
+                        || self.app_of(r).is_some_and(|(a, _)| a.to_lowercase().contains(needle.as_str()))
                 }
             })
             .collect();
@@ -764,6 +812,13 @@ impl Monitor {
             json_str(out, &r.name);
             out.push_str(",\"cmd\":");
             json_str(out, &r.cmd);
+            if let Some((app, via)) = self.app_of(r) {
+                out.push_str(",\"app\":");
+                json_str(out, app);
+                if via {
+                    out.push_str(",\"app_via\":true");
+                }
+            }
             out.push_str(",\"cpu\":");
             json_num(out, r.cpu as f64);
             out.push_str(",\"mem\":");
@@ -921,6 +976,7 @@ fn new_meta(p: &sysinfo::Process) -> Meta {
             break;
         }
     }
+    let app = p.cmd().first().and_then(|a| app_from_path(&a.to_string_lossy()).map(Arc::from));
     let cmd = truncate(&cmd, CMD_MAX_CHARS);
     let mut hay = String::with_capacity(name.len() + cmd.len() + 1);
     hay.push_str(&name.to_lowercase());
@@ -930,11 +986,21 @@ fn new_meta(p: &sysinfo::Process) -> Meta {
         start: p.start_time(),
         name: Arc::from(name.as_ref()),
         cmd: Arc::from(cmd),
+        app,
         hay: hay.into_boxed_str(),
         mask: 0,
         mask_gen: 0,
         seen: 0,
     }
+}
+
+/// Nombre del bundle `.app` más externo en la ruta: el de la app, no el de un helper
+/// anidado (`/Applications/Google Chrome.app/.../Google Chrome Helper.app/...` → "Google Chrome").
+fn app_from_path(path: &str) -> Option<&str> {
+    let end = path.find(".app/").or_else(|| path.strip_suffix(".app").map(str::len))?;
+    let start = path[..end].rfind('/').map_or(0, |i| i + 1);
+    let name = &path[start..end];
+    (!name.is_empty()).then_some(name)
 }
 
 fn mask_for(hay: &str, needles: &[Option<String>]) -> u64 {
@@ -1003,6 +1069,43 @@ mod tests {
         let n: Arc<str> = Arc::from("bun.exe");
         let c = cand(&r, 0, 1, 1, &n, (3.1 * GB) as u64, 0.0, 43 * 60, 1).unwrap();
         assert!(c.metric == Metric::Runtime && (c.value - 43.0).abs() < 1e-9 && c.limit == 40.0);
+    }
+
+    #[test]
+    fn app_names() {
+        let chrome = "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)";
+        assert_eq!(app_from_path(chrome), Some("Google Chrome"));
+        assert_eq!(app_from_path("/Applications/Claude.app/Contents/MacOS/Claude"), Some("Claude"));
+        assert_eq!(app_from_path("/Users/me/Applications/Orca.app"), Some("Orca"));
+        assert_eq!(app_from_path("/Users/me/.local/bin/claude"), None);
+        assert_eq!(app_from_path("/opt/foo.application/bin/x"), None);
+        assert_eq!(app_from_path("C:\\Program Files\\x.exe"), None);
+    }
+
+    /// Sin app propia, se hereda la del ancestro más cercano.
+    #[test]
+    fn app_inherited_from_ancestor() {
+        let mut m = Monitor::new(Config::parse("").unwrap(), EventLog::new(None));
+        let row = |pid, ppid| Row {
+            pid, ppid, start: 1, cpu: 0.0, mem: 0, runtime: 0,
+            name: Arc::from("x"), cmd: Arc::from(""), mask: 0, heat: 0.0,
+        };
+        let meta = |app: Option<&str>| Meta {
+            start: 1, name: Arc::from("x"), cmd: Arc::from(""), app: app.map(Arc::from),
+            hay: "".into(), mask: 0, mask_gen: 0, seen: 0,
+        };
+        m.rows = vec![row(1, 0), row(50, 1), row(60, 50), row(70, 60), row(80, 1)];
+        for (i, r) in m.rows.iter().enumerate() {
+            m.idx.insert(r.pid, i as u32);
+        }
+        for pid in [1, 60, 70, 80] {
+            m.cache.insert(pid, meta(None));
+        }
+        m.cache.insert(50, meta(Some("Orca")));
+        let app = |i: usize| m.app_of(&m.rows[i]).map(|(a, via)| (a.to_string(), via));
+        assert_eq!(app(1), Some(("Orca".into(), false)));
+        assert_eq!(app(3), Some(("Orca".into(), true)));
+        assert_eq!(app(4), None);
     }
 
     #[test]
