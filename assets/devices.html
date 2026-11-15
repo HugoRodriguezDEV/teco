@@ -123,7 +123,9 @@ function card(d) {
 
 function render() {
   const g = $("grid");
-  st.devs.forEach(d => { const el = card(d); if (el.parentNode !== g) g.appendChild(el); });
+  // Solo se mueve un nodo si cambió de lugar (moverlo le quita el foco).
+  st.devs.forEach((d, i) => { const el = card(d); if (g.children[i] !== el) g.insertBefore(el, g.children[i] || null); });
+  while (g.children.length > st.devs.length) g.lastChild.remove();
   $("hint").hidden = st.devs.length > 1;
   const on = st.devs.filter(d => d.ok);
   const bad = on.filter(d => d.data.status === "alert").length;
@@ -150,26 +152,36 @@ async function fetchOne(d) {
   } finally { clearTimeout(t); }
 }
 
+// La lista sale de teco.toml y se recarga en caliente: se vuelve a pedir en cada ciclo
+// para que agregar o quitar un [[device]] se vea sin recargar la página.
+async function syncDevices() {
+  try {
+    const r = await fetch("/api/devices", {cache: "no-store"});
+    if (!r.ok) return;
+    const old = new Map(st.devs.filter(d => !d.self).map(d => [d.url, d]));
+    const next = [st.devs[0]];
+    for (const x of await r.json()) {
+      const d = old.get(x.url) || {url: x.url};
+      d.name = x.name;
+      next.push(d);
+    }
+    st.devs = next;
+  } catch (e) {}
+}
+
 async function poll() {
   clearTimeout(st.timer);
   if (document.visibilityState !== "visible") return; // pestaña oculta: no se pide nada
   if (!st.busy) {
     st.busy = true;
-    try { await Promise.all(st.devs.map(fetchOne)); render(); } finally { st.busy = false; }
+    try { await syncDevices(); await Promise.all(st.devs.map(fetchOne)); render(); } finally { st.busy = false; }
   }
   st.timer = setTimeout(poll, st.interval);
 }
 
-async function init() {
-  try {
-    const r = await fetch("/api/devices", {cache: "no-store"});
-    if (r.ok) for (const d of await r.json()) st.devs.push({name: d.name, url: d.url});
-  } catch (e) {}
-  render();
-  poll();
-}
 document.addEventListener("visibilitychange", poll);
-init();
+render();
+poll();
 </script>
 </body>
 </html>
