@@ -25,7 +25,7 @@ Teco ya escucha por defecto en `127.0.0.1:7777` y su protección de `Host` ya ac
 
 **Nodos etiquetados vs. Mac de trabajo.** Un dispositivo etiquetado deja de pertenecer a un usuario. La Mac se usa también para navegar y debe seguir siendo de Hugo, así que el instalador detecta con `tailscale status --json` si ya hay sesión con usuario y, en ese caso, no ejecuta `tailscale up`. La MSI entra etiquetada con `tag:teco,tag:zotz` porque corre ambas apps.
 
-**Publicación con `tailscale serve`.** `tailscale serve --bg --https=<puerto> http://127.0.0.1:<puerto-tailnet-app>` (para Teco, `127.0.0.1:7778`, el listener que siempre exige login; nunca el local `7777`) da HTTPS con un nombre fijo `<host>.<tailnet>.ts.net` sin abrir puertos ni exponer Teco fuera de loopback. Puertos HTTPS: Teco 443, Zotz 8443 (cada app su puerto en el mismo nodo).
+**Publicación con `tailscale serve`.** `tailscale serve --bg --https=<puerto> http://127.0.0.1:<puerto-tailnet-app>` (para Teco, `127.0.0.1:7778`, el listener que siempre exige login; nunca el local `7777`) da HTTPS con un nombre fijo `<host>.tail59ed16.ts.net` sin abrir puertos ni exponer Teco fuera de loopback. Puertos HTTPS: Teco 443, Zotz 8443 (cada app su puerto en el mismo nodo).
 
 **Idempotencia.** Cada paso verifica antes de actuar: Tailscale instalado, nodo unido con las etiquetas esperadas, serve configurado, binario con el mismo hash, config existente (no se sobrescribe), servicio registrado. Repetir el instalador no cambia nada si el estado ya es el deseado.
 

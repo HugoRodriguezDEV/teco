@@ -4,7 +4,7 @@
 
 La red ya es privada (Tailscale), pero dentro de ella hoy cualquiera que llegue al panel puede ver los procesos y, si está activado, terminarlos. Hugo quiere un login real para sus herramientas internas, compartido por Teco y Zotz, que permita sumar después a gente del equipo por correo y con roles, sin depender de Qué Onda (que tiene su propio auth en un VPS con Neon). Se hace ya porque es el "brinco" que van a dar ambas herramientas y conviene definir un solo modelo de identidad desde el inicio.
 
-**Depende de `add-node-bootstrap`**: el login con Google necesita que cada panel tenga un nombre HTTPS fijo (`https://<host>.<tailnet>.ts.net`) registrado como URL de regreso en Supabase.
+**Depende de `add-node-bootstrap`**: el login con Google necesita que cada panel tenga un nombre HTTPS fijo (`https://<host>.tail59ed16.ts.net`) registrado como URL de regreso en Supabase.
 
 ## What Changes
 

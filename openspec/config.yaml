@@ -30,6 +30,9 @@ context: |
     repositorio con un switch; más adelante tendrá un tablero. Corre en la MSI.
   - Teco y Zotz comparten la tailnet privada de Tailscale y, a futuro, el mismo
     proyecto de Supabase para el login de las herramientas internas.
+  - Tailnet: `tail59ed16.ts.net` (MagicDNS y certificados HTTPS activados).
+    Nombres de host: `msi-zotz` (MSI, nodo etiquetado tag:zotz + tag:teco) y
+    `mac-hugo` (Mac de trabajo, con la cuenta de Hugo, sin etiqueta).
   - Qué Onda queda fuera: tiene su propio servicio de autenticación en un VPS y usa
     Neon como base de datos. Teco no depende de él.
 

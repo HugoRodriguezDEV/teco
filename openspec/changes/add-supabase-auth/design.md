@@ -52,7 +52,7 @@ Sin sección `[auth]`, Teco se comporta como hoy.
 ## Migration Plan
 
 1. Crear el proyecto de Supabase, tablas, RLS, hook y proveedor Google (con el conector de Supabase).
-2. Registrar las URLs `https://<nodo>.<tailnet>.ts.net` como URLs de regreso.
+2. Registrar las URLs `https://<nodo>.tail59ed16.ts.net` como URLs de regreso.
 3. Desplegar Teco con `[auth]`; verificar login y roles desde la Mac.
 4. Rollback: quitar la sección `[auth]` de `teco.toml` (recarga en caliente) y Teco vuelve al comportamiento anterior.
 

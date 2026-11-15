@@ -8,7 +8,7 @@
 - [ ] 1.4 Crear el Custom Access Token Hook que agrega `app_roles` al JWT; verificar decodificando un token de Hugo y viendo ambos roles
 - [ ] 1.5 Activar llaves de firma asimétricas y confirmar que `/auth/v1/.well-known/jwks.json` publica la llave; verificar con `curl`
 - [ ] 1.6 Crear la tabla `devices` con RLS `user_id = auth.uid()` y clave única por (user_id, app, hostname); verificar que otra cuenta no ve filas ajenas
-- [ ] 1.7 Registrar como URLs de regreso los nombres `https://<nodo>.<tailnet>.ts.net` y `http://127.0.0.1:*` para `teco login`; verificar en Auth → URL Configuration
+- [ ] 1.7 Registrar como URLs de regreso los nombres `https://<nodo>.tail59ed16.ts.net` y `http://127.0.0.1:*` para `teco login`; verificar en Auth → URL Configuration
 
 ## 2. Verificación de tokens en Teco
 

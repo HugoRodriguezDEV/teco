@@ -23,7 +23,7 @@ La política SHALL declarar a Hugo como dueño de `tag:teco` y `tag:zotz`, de mo
 La política SHALL permitir a la cuenta de Hugo llegar a todos los puertos de los nodos con `tag:teco` y `tag:zotz`.
 
 #### Scenario: Hugo abre el panel desde la Mac
-- **WHEN** Hugo abre `https://msi-zotz.<tailnet>.ts.net` desde su Mac
+- **WHEN** Hugo abre `https://msi-zotz.tail59ed16.ts.net` desde su Mac
 - **THEN** la conexión llega al panel de Teco en la MSI
 
 ### Requirement: Zotz consulta a Teco

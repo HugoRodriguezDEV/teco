@@ -10,7 +10,7 @@ El proyecto SHALL proveer `install.sh` para macOS e `install.ps1` para Windows q
 
 #### Scenario: MSI nueva
 - **WHEN** se ejecuta `install.ps1` en una MSI sin Tailscale ni Teco y con el secreto de Tailscale disponible localmente
-- **THEN** al terminar Teco corre, arranca solo al iniciar sesión y su panel responde en `https://<host>.<tailnet>.ts.net`
+- **THEN** al terminar Teco corre, arranca solo al iniciar sesión y su panel responde en `https://<host>.tail59ed16.ts.net`
 
 ### Requirement: Idempotencia
 Ejecutar el instalador varias veces SHALL producir el mismo estado final. Un paso cuyo resultado ya existe MUST NOT repetirse ni modificar lo existente.
