@@ -146,7 +146,7 @@ Un solo comando deja el nodo listo y es idempotente: correrlo otra vez no cambia
 **Windows (MSI, nodo 24/7 con `tag:teco` y `tag:zotz`):**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\install.ps1
 ```
 
 - Si no existe `target/release/teco`, el instalador lo compila con `cargo`.

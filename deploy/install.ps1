@@ -1,7 +1,7 @@
 ﻿# Instalador de nodo para Windows (Teco por defecto; reutilizable por Zotz).
 # Idempotente: correrlo varias veces deja siempre el mismo estado.
 #
-#   .\deploy\install.ps1                                   # Teco en la MSI
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\install.ps1   # Teco en la MSI
 #   .\deploy\install.ps1 -App zotz -Binary .\zotz.exe -ServeHttpsPort 8443 `
 #       -ServeTarget http://127.0.0.1:8788 -ConfigureApp:$false
 #
@@ -45,7 +45,11 @@ if (-not $ts) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Die "Falta Tailscale y no hay winget. Descárgalo de https://tailscale.com/download/windows, instálalo y vuelve a correr esto."
     }
-    winget install --id tailscale.tailscale -e --silent --accept-package-agreements --accept-source-agreements
+    # El ID distingue mayúsculas con --exact.
+    winget install --id Tailscale.Tailscale --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+        Die "winget no pudo instalar Tailscale (código $LASTEXITCODE). Instálalo a mano desde https://tailscale.com/download/windows y vuelve a correr esto."
+    }
     $ts = Find-Tailscale
     if (-not $ts) { Die "Tailscale se instaló pero no encuentro tailscale.exe. Abre una terminal nueva y vuelve a correr esto." }
 } else {
