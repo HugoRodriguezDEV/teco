@@ -95,23 +95,36 @@ fn check(path: &Path) {
     println!("✓ {}", path.display());
     println!("  panel: http://{}  · cada {} s · terminar desde el panel: {}", c.bind, c.interval_secs, if c.allow_kill_from_panel { "sí" } else { "no" });
     let s = &c.system;
-    println!(
-        "  sistema: RAM {:?} % · swap {:?} GB · CPU {:?} % · sostenido {} s",
-        s.max_mem_percent, s.max_swap_gb, s.max_cpu_percent, s.for_secs
-    );
+    let sys = limits(&[("RAM", s.max_mem_percent, "%"), ("swap", s.max_swap_gb, "GB"), ("CPU", s.max_cpu_percent, "%")]);
+    println!("  sistema: {sys} · sostenido {} s", s.for_secs);
     for r in &c.rules {
+        let lims = limits(&[("mem", r.max_mem_gb, "GB"), ("cpu", r.max_cpu_percent, "%"), ("vivo", r.max_runtime_min, "min")]);
+        let action = match r.action {
+            config::Action::Alert => "avisar",
+            config::Action::Kill => "terminar",
+        };
         println!(
-            "  • {} — match {:?}{} · mem {:?} GB · cpu {:?} % · vivo {:?} min · {} s · {:?}",
+            "  • {} — match {:?}{} · {lims} · sostenido {} s · {action}",
             r.name,
             r.pattern,
             if r.include_children { " (+hijos)" } else { "" },
-            r.max_mem_gb,
-            r.max_cpu_percent,
-            r.max_runtime_min,
             r.for_secs,
-            r.action
         );
     }
+}
+
+/// "RAM 90 % · CPU 95 %": only the limits that are set; "sin límites" if none.
+fn limits(items: &[(&str, Option<f64>, &str)]) -> String {
+    let parts: Vec<String> = items
+        .iter()
+        .filter_map(|&(label, v, unit)| v.map(|v| format!("{label} {} {unit}", num(v))))
+        .collect();
+    if parts.is_empty() { "sin límites".into() } else { parts.join(" · ") }
+}
+
+/// 90.0 → "90", 1.5 → "1.5".
+fn num(v: f64) -> String {
+    if v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v}") }
 }
 
 fn run(path: &Path, t0: Instant) {
