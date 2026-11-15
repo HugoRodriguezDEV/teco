@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teco · Dispositivos</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root{
+  --bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mute:#5d6672;--line:#e3e6ea;--bar:#e9ecef;
+  --ok:#1f8a4c;--ok-bg:#e5f5ec;--warn:#a86b00;--warn-bg:#fff4d9;--bad:#c62828;--bad-bg:#fde8e8;
+  --accent:#3a5bd9;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1216;--card:#171b21;--ink:#e8eaed;--mute:#98a2ae;--line:#262c34;--bar:#232931;
+  --ok:#4cc480;--ok-bg:#12291d;--warn:#f0b43c;--warn-bg:#2d2310;--bad:#ff6b6b;--bad-bg:#341617;
+  --accent:#8aa2ff;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:1100px;margin:0 auto;padding:16px}
+header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+header svg{width:28px;height:28px;flex:none}
+header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+header .sum{color:var(--mute);font-size:13px;margin-left:auto;text-align:right;white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.dev{display:block;color:inherit;text-decoration:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;transition:border-color .15s,transform .15s}
+.dev:hover{border-color:var(--accent)}
+.dev:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dev.s-alert{border-color:var(--bad)}
+.top{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px}
+.who{min-width:0;flex:1}
+.who b{display:block;font-size:16px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who small{display:block;color:var(--mute);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:650;border-radius:20px;padding:3px 10px;white-space:nowrap;background:var(--ok-bg);color:var(--ok)}
+.pill::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.s-watch .pill{background:var(--warn-bg);color:var(--warn)}
+.s-alert .pill{background:var(--bad-bg);color:var(--bad)}
+.s-off .pill{background:var(--bar);color:var(--mute)}
+.bars{display:grid;gap:9px}
+.bar{display:grid;grid-template-columns:42px 1fr 118px;gap:10px;align-items:center;font-variant-numeric:tabular-nums}
+.bar span:first-child{color:var(--mute);font-weight:600;font-size:13px}
+.bar span:last-child{text-align:right;color:var(--mute);font-size:12.5px;white-space:nowrap}
+.track{position:relative;height:8px;border-radius:5px;background:var(--bar);overflow:hidden}
+.fill{height:100%;width:0;border-radius:5px;background:var(--ok);transition:width .4s}
+.fill.warn{background:var(--warn)}.fill.bad{background:var(--bad)}
+.lim{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--mute);opacity:.55}
+.foot{display:flex;justify-content:space-between;gap:8px;margin-top:14px;color:var(--mute);font-size:12.5px}
+.foot .go{color:var(--accent);font-weight:600}
+.s-off .bars{opacity:.35}
+.empty{color:var(--mute);background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:16px;font-size:13px}
+.empty code{background:var(--bar);border-radius:4px;padding:1px 5px;font-size:12.5px}
+@media (max-width:720px){.bar{grid-template-columns:36px 1fr auto}.bar span:last-child{font-size:12px}header .sum{display:none}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M1.5 .8 5 3.6h6L14.5.8V9c0 3.6-2.9 6.2-6.5 6.2S1.5 12.6 1.5 9ZM5.4 4.9a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Zm5.2 0a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2ZM5.6 6.3a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Zm4.8 0a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2ZM7.1 10.6h1.8L8 12.2Z"/></svg>
+    <h1>Dispositivos</h1>
+    <div class="sum" id="sum"></div>
+  </header>
+  <div class="grid" id="grid" aria-live="polite"></div>
+  <p class="empty" id="hint" hidden>Solo aparece este equipo. Para sumar otro nodo con Teco, agrega en <code>teco.toml</code>:<br><br>
+    <code>[[device]]</code><br><code>name = "MSI"</code><br><code>url = "https://msi.tu-tailnet.ts.net"</code></p>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const GB = 1073741824, MB = 1048576;
+const fmtB = b => b >= GB ? (b / GB).toFixed(1) + " GB" : Math.round(b / MB) + " MB";
+const fmtDur = s => s < 60 ? Math.round(s) + " s" : s < 3600 ? Math.floor(s / 60) + " min"
+  : s < 86400 ? Math.floor(s / 3600) + " h" : Math.floor(s / 86400) + " d";
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const OS = {macos: "macOS", windows: "Windows", linux: "Linux"};
+const TEXT = {ok: "Tranquilo", watch: "Atento", alert: "Alerta", off: "Sin conexión"};
+
+// Este equipo siempre va primero (url "" = mismo origen); luego los de teco.toml.
+const st = {devs: [{name: "", url: "", self: true}], interval: 2000, timer: 0, busy: false};
+
+function bar(pct, lim, txt, label) {
+  const p = Math.max(0, Math.min(100, pct || 0));
+  const ratio = lim > 0 ? pct / lim : pct / 100;
+  const cls = ratio >= 1 ? " bad" : ratio >= 0.8 ? " warn" : "";
+  const limEl = lim > 0 && lim <= 100 ? '<div class="lim" style="left:calc(' + lim + '% - 1px)"></div>' : "";
+  return '<div class="bar"><span>' + label + '</span><div class="track"><div class="fill' + cls + '" style="width:' + p + '%"></div>'
+    + limEl + '</div><span>' + txt + '</span></div>';
+}
+
+function link(d) {
+  if (d.self) return "/equipo";
+  return d.url + "/equipo?hub=" + encodeURIComponent(location.origin);
+}
+
+function card(d) {
+  const x = d.data;
+  const status = d.ok && x ? x.status : "off";
+  const title = d.self ? (x ? x.host : "Este equipo") : d.name;
+  let sub = d.self ? "Este equipo" : (x ? x.host : d.url.replace(/^https?:\/\//, ""));
+  if (x) sub += " · " + (OS[x.os] || x.os) + " · " + x.sys.cores + " núcleos";
+  const s = x ? x.sys : {cpu: 0, mem_used: 0, mem_total: 0, swap_used: 0, swap_total: 0, lim_cpu: 0, lim_mem: 0, lim_swap_gb: 0};
+  const memPct = s.mem_total ? s.mem_used * 100 / s.mem_total : 0;
+  const swapPct = s.swap_total ? s.swap_used * 100 / s.swap_total : 0;
+  const swapLim = s.swap_total && s.lim_swap_gb ? s.lim_swap_gb * GB * 100 / s.swap_total : 0;
+  let foot;
+  if (status === "off") foot = d.seen ? "visto hace " + fmtDur((Date.now() - d.seen) / 1000) : "no responde";
+  else if (x.alerts_fired) foot = x.alerts_fired + (x.alerts_fired === 1 ? " alerta activa" : " alertas activas");
+  else if (x.alerts_near) foot = x.alerts_near + " cerca del límite";
+  else foot = x.proc_count + " procesos";
+  // El <a> se crea una vez y se reutiliza: así no se pierde el foco ni el hover al refrescar.
+  if (!d.el) { d.el = document.createElement("a"); d.el.href = link(d); }
+  d.el.className = "dev s-" + status;
+  d.el.innerHTML = '<div class="top"><div class="who"><b>' + esc(title) + '</b><small>' + esc(sub) + '</small></div>'
+    + '<span class="pill">' + TEXT[status] + '</span></div>'
+    + '<div class="bars">'
+    + bar(s.cpu, s.lim_cpu, x ? s.cpu.toFixed(0) + " %" : "—", "CPU")
+    + bar(memPct, s.lim_mem, x ? fmtB(s.mem_used) + " / " + fmtB(s.mem_total) : "—", "RAM")
+    + bar(swapPct, swapLim, x ? (s.swap_total ? fmtB(s.swap_used) + " / " + fmtB(s.swap_total) : "sin swap") : "—", "Swap")
+    + '</div><div class="foot"><span>' + esc(foot) + '</span><span class="go">Ver procesos →</span></div>';
+  return d.el;
+}
+
+function render() {
+  const g = $("grid");
+  st.devs.forEach(d => { const el = card(d); if (el.parentNode !== g) g.appendChild(el); });
+  $("hint").hidden = st.devs.length > 1;
+  const on = st.devs.filter(d => d.ok);
+  const bad = on.filter(d => d.data.status === "alert").length;
+  $("sum").textContent = on.length + " de " + st.devs.length + " en línea" + (bad ? " · " + bad + " en alerta" : "");
+  const worst = bad ? "alert" : on.some(d => d.data.status === "watch") ? "watch" : "ok";
+  document.title = (worst === "alert" ? "🔴 " : worst === "watch" ? "🟡 " : "") + "Teco · Dispositivos";
+}
+
+async function fetchOne(d) {
+  // Un nodo que no responde se reintenta cada ~15 s, no en cada ciclo.
+  if (!d.ok && d.tried && Date.now() - d.tried < 15000) return;
+  d.tried = Date.now();
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 4000);
+  try {
+    const r = await fetch(d.url + "/api/summary", {cache: "no-store", signal: ctl.signal});
+    if (!r.ok) throw new Error(r.status);
+    d.data = await r.json();
+    d.ok = true;
+    d.seen = Date.now();
+    if (d.self) st.interval = Math.max(2000, d.data.interval * 1000);
+  } catch (e) {
+    d.ok = false;
+  } finally { clearTimeout(t); }
+}
+
+async function poll() {
+  clearTimeout(st.timer);
+  if (document.visibilityState !== "visible") return; // pestaña oculta: no se pide nada
+  if (!st.busy) {
+    st.busy = true;
+    try { await Promise.all(st.devs.map(fetchOne)); render(); } finally { st.busy = false; }
+  }
+  st.timer = setTimeout(poll, st.interval);
+}
+
+async function init() {
+  try {
+    const r = await fetch("/api/devices", {cache: "no-store"});
+    if (r.ok) for (const d of await r.json()) st.devs.push({name: d.name, url: d.url});
+  } catch (e) {}
+  render();
+  poll();
+}
+document.addEventListener("visibilitychange", poll);
+init();
+</script>
+</body>
+</html>

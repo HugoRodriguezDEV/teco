@@ -4,12 +4,14 @@
 
 use crate::events::Kind;
 use crate::monitor::{Monitor, SortBy};
+use crate::util::json_str;
 use std::io::{Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const INDEX_HTML: &str = include_str!("../assets/index.html");
+const DEVICES_HTML: &str = include_str!("../assets/devices.html");
 const LOGO_SVG: &str = include_str!("../assets/teco.svg");
 const MAX_HEAD: usize = 8 * 1024;
 const MAX_BODY: usize = 1024;
@@ -122,7 +124,40 @@ fn route(
     let method = if req.method == "HEAD" { "GET" } else { req.method };
     let head_only = req.method == "HEAD";
     match (method, req.path) {
-        ("GET", "/") | ("GET", "/index.html") => respond(s, head_only, 200, "text/html; charset=utf-8", INDEX_HTML.as_bytes(), false),
+        ("GET", "/") => {
+            // La vista de dispositivos pide /api/summary a cada nodo: se permiten esos orígenes.
+            let connect: String = lock(mon).cfg.devices.iter().map(|d| format!(" {}", d.url)).collect();
+            let extra = format!("Content-Security-Policy: {}\r\n", csp(&connect));
+            respond_with(s, head_only, 200, "text/html; charset=utf-8", DEVICES_HTML.as_bytes(), false, &extra)
+        }
+        ("GET", "/equipo") | ("GET", "/index.html") => {
+            respond(s, head_only, 200, "text/html; charset=utf-8", INDEX_HTML.as_bytes(), false)
+        }
+        ("GET", "/api/devices") => {
+            json.clear();
+            json.push('[');
+            for (i, d) in lock(mon).cfg.devices.iter().enumerate() {
+                if i > 0 {
+                    json.push(',');
+                }
+                json.push_str("{\"name\":");
+                json_str(json, &d.name);
+                json.push_str(",\"url\":");
+                json_str(json, &d.url);
+                json.push('}');
+            }
+            json.push(']');
+            respond(s, head_only, 200, "application/json", json.as_bytes(), false)
+        }
+        ("GET", "/api/summary") => {
+            lock(mon).write_summary(json);
+            // Lectura entre nodos: CORS solo para orígenes de la tailnet o de esta máquina.
+            let extra = match req.origin.filter(|o| cors_ok(o)) {
+                Some(o) => format!("Access-Control-Allow-Origin: {o}\r\nVary: Origin\r\n"),
+                None => "Vary: Origin\r\n".to_string(),
+            };
+            respond_with(s, head_only, 200, "application/json", json.as_bytes(), false, &extra)
+        }
         ("GET", "/logo.svg") | ("GET", "/favicon.svg") | ("GET", "/favicon.ico") => {
             respond(s, head_only, 200, "image/svg+xml", LOGO_SVG.as_bytes(), true)
         }
@@ -200,7 +235,48 @@ fn host_ok(host: Option<&str>, local_ip: Option<IpAddr>) -> bool {
     }
 }
 
+/// Orígenes que pueden leer `/api/summary` desde otro nodo: loopback, `localhost`,
+/// nombres `*.ts.net` e IPs de Tailscale (100.64.0.0/10 y fd7a:115c:a1e0::/48).
+fn cors_ok(origin: &str) -> bool {
+    let Some(rest) = origin.strip_prefix("https://").or_else(|| origin.strip_prefix("http://")) else {
+        return false;
+    };
+    let name = if let Some(r) = rest.strip_prefix('[') {
+        r.split(']').next().unwrap_or("")
+    } else {
+        rest.rsplit_once(':').map(|(n, _)| n).unwrap_or(rest)
+    };
+    let name = name.trim_end_matches('.').to_ascii_lowercase();
+    if name == "localhost" || name.ends_with(".localhost") || name.ends_with(".ts.net") {
+        return true;
+    }
+    match name.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => ip.is_loopback() || (ip.octets()[0] == 100 && ip.octets()[1] & 0xC0 == 64),
+        Ok(IpAddr::V6(ip)) => ip.is_loopback() || ip.segments()[..3] == [0xfd7a, 0x115c, 0xa1e0],
+        Err(_) => false,
+    }
+}
+
+fn csp(connect: &str) -> String {
+    format!(
+        "default-src 'self'; connect-src 'self'{connect}; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:"
+    )
+}
+
 fn respond(s: &mut TcpStream, head_only: bool, code: u16, ctype: &str, body: &[u8], cache: bool) -> std::io::Result<()> {
+    respond_with(s, head_only, code, ctype, body, cache, "")
+}
+
+/// `extra`: cabeceras adicionales terminadas en `\r\n`. Si trae su propia CSP, reemplaza la de por defecto.
+fn respond_with(
+    s: &mut TcpStream,
+    head_only: bool,
+    code: u16,
+    ctype: &str,
+    body: &[u8],
+    cache: bool,
+    extra: &str,
+) -> std::io::Result<()> {
     let reason = match code {
         200 => "OK",
         400 => "Bad Request",
@@ -211,11 +287,17 @@ fn respond(s: &mut TcpStream, head_only: bool, code: u16, ctype: &str, body: &[u
         413 => "Payload Too Large",
         _ => "Request Header Fields Too Large",
     };
+    let default_csp;
+    let csp_line = if extra.contains("Content-Security-Policy:") {
+        ""
+    } else {
+        default_csp = format!("Content-Security-Policy: {}\r\n", csp(""));
+        &default_csp
+    };
     let head = format!(
         "HTTP/1.1 {code} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n\
          Cache-Control: {}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n\
-         Content-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:\r\n\
-         Referrer-Policy: no-referrer\r\nConnection: close\r\n\r\n",
+         {csp_line}{extra}Referrer-Policy: no-referrer\r\nConnection: close\r\n\r\n",
         body.len(),
         if cache { "max-age=86400" } else { "no-store" }
     );
@@ -274,6 +356,16 @@ mod tests {
         assert!(host_ok(Some("100.64.1.2:7777"), lo));
         assert!(host_ok(Some("zotz.tail1234.ts.net:7777"), lo));
         assert!(!host_ok(Some("evil.example.com:7777"), lo));
+    }
+
+    #[test]
+    fn cors_origins() {
+        for ok in ["http://127.0.0.1:7777", "http://localhost:7777", "https://msi.tail1.ts.net", "http://100.101.2.3:7777", "http://[fd7a:115c:a1e0::1]:7777"] {
+            assert!(cors_ok(ok), "{ok}");
+        }
+        for bad in ["https://evil.example.com", "http://8.8.8.8", "http://100.128.0.1", "null", "127.0.0.1"] {
+            assert!(!cors_ok(bad), "{bad}");
+        }
     }
 
     #[test]
