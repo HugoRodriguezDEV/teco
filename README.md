@@ -124,35 +124,45 @@ El botón **Terminar** solo aparece con `allow_kill_from_panel = true`. Tiene es
 - aplica las mismas protecciones que `kill`;
 - rechaza el PID si ya pertenece a otro proceso;
 - exige la cabecera `X-Teco` y un `Origin` igual al `Host`, contra CSRF;
-- valida `Host` contra DNS rebinding. Acepta loopback, IPs literales y `*.ts.net`, así que funciona por Tailscale si pones `bind = "0.0.0.0:7777"` o la IP de Tailscale.
+- valida `Host` contra DNS rebinding. Acepta loopback, IPs literales y `*.ts.net`, así que funciona por Tailscale con `tailscale serve` (ver abajo).
 
-## Arranque automático
+## Instalación como nodo (Tailscale + arranque automático)
 
-**macOS (launchd):**
+Un solo comando deja el nodo listo y es idempotente: correrlo otra vez no cambia nada. Hace esto:
 
-```bash
-cargo build --release
-```
+- instala Tailscale si falta;
+- une la máquina a la tailnet `tail59ed16.ts.net`, solo si no tiene sesión;
+- publica el panel por HTTPS dentro de la tailnet con `tailscale serve`, hacia `127.0.0.1:7778`;
+- copia el binario;
+- crea `teco.toml` si no existe;
+- registra el arranque automático.
 
-```bash
-sudo cp target/release/teco /usr/local/bin/teco
-```
-
-```bash
-cp packaging/macos/dev.hugorodriguez.teco.plist ~/Library/LaunchAgents/
-```
+**macOS** (tu Mac de trabajo con sesión de Tailscale a tu nombre; el instalador no la cambia):
 
 ```bash
-launchctl load -w ~/Library/LaunchAgents/dev.hugorodriguez.teco.plist
+./deploy/install.sh
 ```
 
-**Windows (Programador de tareas, al iniciar sesión, se reinicia si se cae):**
+**Windows (MSI, nodo 24/7 con `tag:teco` y `tag:zotz`):**
 
 ```powershell
-cargo build --release
-mkdir $env:LOCALAPPDATA\teco -Force; copy target\release\teco.exe $env:LOCALAPPDATA\teco\
-.\packaging\windows\install-task.ps1
+powershell -ExecutionPolicy Bypass -File .\deploy\install.ps1
 ```
+
+- Si no existe `target/release/teco`, el instalador lo compila con `cargo`.
+- **Secreto de Tailscale.** Solo hace falta en una máquina que aún no está en la tailnet. Se lee de la variable `TS_OAUTH_SECRET` o de un archivo local:
+  - Windows: `%LOCALAPPDATA%\zotz-nodes\tailscale.secret`
+  - macOS: `~/.config/zotz-nodes/tailscale.secret`
+
+  Nunca va en el repo y el instalador no lo imprime.
+- **Política de la tailnet.** [`deploy/tailscale/policy.hujson`](deploy/tailscale/policy.hujson) es una copia de referencia con marcadores. La versión real, con correos, vive solo en la consola de Tailscale.
+- **Zotz** usa los mismos scripts con sus parámetros: `APP`, `BIN`, `SERVE_HTTPS_PORT=8443`, `SERVE_TARGET` (ver la cabecera de cada script).
+
+Teco escucha en dos puertos, ambos solo en loopback:
+- `bind` (`127.0.0.1:7777`): acceso local.
+- `bind_tailnet` (`127.0.0.1:7778`): el destino de `tailscale serve`.
+
+Hoy los dos se comportan igual. Cuando llegue el login con Supabase, el de la tailnet siempre pedirá sesión.
 
 En Windows, `teco.exe` corre sin ventana de consola. Cuando lo lanzas desde una terminal (`teco bench`, `teco check`) se engancha a ella para imprimir.
 

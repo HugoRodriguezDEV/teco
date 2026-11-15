@@ -1,0 +1,29 @@
+// Política de la tailnet tail59ed16.ts.net (Teco + Zotz).
+// Copia de referencia: la versión real, con los correos de verdad, vive SOLO en
+// la consola de Tailscale (Access controls). Este repo es público: aquí van marcadores.
+{
+  // Cuentas con acceso total. Reemplaza los marcadores al pegar en la consola.
+  "groups": {
+    "group:admins": ["ADMIN_1@gmail.com", "ADMIN_2@gmail.com"],
+    // Equipo, a futuro: acceso solo a Zotz.
+    "group:equipo": []
+  },
+
+  "tagOwners": {
+    "tag:teco": ["group:admins"],
+    "tag:zotz": ["group:admins"]
+  },
+
+  "grants": [
+    // Los admins llegan a sus propias máquinas y a los nodos etiquetados.
+    {"src": ["group:admins"], "dst": ["autogroup:self", "tag:teco", "tag:zotz"], "ip": ["*"]},
+
+    // Zotz puede leer el panel de Teco (HTTPS).
+    {"src": ["tag:zotz"], "dst": ["tag:teco"], "ip": ["443"]}
+  ],
+
+  "tests": [
+    {"src": "ADMIN_1@gmail.com", "accept": ["tag:teco:443", "tag:zotz:8443"]},
+    {"src": "tag:zotz", "accept": ["tag:teco:443"], "deny": ["tag:zotz:22"]}
+  ]
+}

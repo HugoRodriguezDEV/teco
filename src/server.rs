@@ -20,16 +20,24 @@ pub fn bind(addr: &str) -> std::io::Result<TcpListener> {
     TcpListener::bind(addr)
 }
 
-pub fn spawn(listener: TcpListener, mon: Arc<Mutex<Monitor>>) -> std::io::Result<()> {
+/// Por qué listener llegó la petición. Se decide por el puerto, nunca por la cabecera
+/// `Host` (que la escribe el cliente): `Tailnet` es el destino de `tailscale serve`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Via {
+    Local,
+    Tailnet,
+}
+
+pub fn spawn(listener: TcpListener, mon: Arc<Mutex<Monitor>>, via: Via) -> std::io::Result<()> {
     std::thread::Builder::new()
-        .name("teco-http".into())
+        .name(if via == Via::Local { "teco-http".into() } else { "teco-http-tailnet".into() })
         .stack_size(256 * 1024)
         .spawn(move || {
             let mut buf = Vec::with_capacity(MAX_HEAD);
             let mut json = String::new();
             for conn in listener.incoming() {
                 let Ok(stream) = conn else { continue };
-                if let Err(e) = handle(stream, &mon, &mut buf, &mut json) {
+                if let Err(e) = handle(stream, &mon, &mut buf, &mut json, via) {
                     if e.kind() != std::io::ErrorKind::WouldBlock && e.kind() != std::io::ErrorKind::TimedOut {
                         eprintln!("teco: http: {e}");
                     }
@@ -51,9 +59,10 @@ struct Req<'a> {
     origin: Option<&'a str>,
     teco_header: bool,
     body: &'a [u8],
+    via: Via,
 }
 
-fn handle(mut s: TcpStream, mon: &Mutex<Monitor>, buf: &mut Vec<u8>, json: &mut String) -> std::io::Result<()> {
+fn handle(mut s: TcpStream, mon: &Mutex<Monitor>, buf: &mut Vec<u8>, json: &mut String, via: Via) -> std::io::Result<()> {
     s.set_read_timeout(Some(Duration::from_secs(3)))?;
     s.set_write_timeout(Some(Duration::from_secs(3)))?;
     let local_ip = s.local_addr().map(|a| a.ip()).ok();
@@ -102,11 +111,11 @@ fn handle(mut s: TcpStream, mon: &Mutex<Monitor>, buf: &mut Vec<u8>, json: &mut 
         // `head` toma prestado `buf`; se reconstruye la petición con el cuerpo completo.
         let mut full = buf[head_end..].to_vec();
         full.extend_from_slice(&rest);
-        let req = Req { method, path, query, host, origin, teco_header, body: &full };
+        let req = Req { method, path, query, host, origin, teco_header, body: &full, via };
         return route(&mut s, &req, mon, json, local_ip);
     }
     let body = &buf[head_end..head_end + clen];
-    let req = Req { method, path, query, host, origin, teco_header, body };
+    let req = Req { method, path, query, host, origin, teco_header, body, via };
     route(&mut s, &req, mon, json, local_ip)
 }
 
@@ -196,11 +205,11 @@ fn route(
             let r = m.kill(pid, start);
             let (code, msg) = match r {
                 Ok(msg) => {
-                    m.events.push(Kind::Kill, "Desde el panel", msg.clone(), pid);
+                    m.events.push(Kind::Kill, panel_title(req.via), msg.clone(), pid);
                     (200, msg)
                 }
                 Err(e) => {
-                    m.events.push(Kind::Error, "Desde el panel", e.clone(), pid);
+                    m.events.push(Kind::Error, panel_title(req.via), e.clone(), pid);
                     (409, e)
                 }
             };
@@ -209,6 +218,13 @@ fn route(
         }
         ("GET", _) => respond(s, head_only, 404, "text/plain", b"no existe", false),
         _ => respond(s, head_only, 405, "text/plain", b"metodo no permitido", false),
+    }
+}
+
+fn panel_title(via: Via) -> &'static str {
+    match via {
+        Via::Local => "Desde el panel",
+        Via::Tailnet => "Desde el panel (tailnet)",
     }
 }
 

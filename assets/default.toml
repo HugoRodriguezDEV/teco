@@ -2,6 +2,7 @@
 # Este archivo se recarga solo cuando lo guardas (bind requiere reiniciar).
 
 bind = "127.0.0.1:7777"
+bind_tailnet = "127.0.0.1:7778"   # destino de `tailscale serve`; "" lo desactiva
 interval_secs = 2
 allow_kill_from_panel = false
 notifications = true

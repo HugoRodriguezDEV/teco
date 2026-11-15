@@ -14,6 +14,10 @@ pub const MAX_RULES: usize = 64;
 pub struct Config {
     #[serde(default = "d_bind")]
     pub bind: String,
+    /// Listener que publica `tailscale serve` dentro de la tailnet. "" lo desactiva.
+    /// Hoy se comporta igual que `bind`; con `[auth]` exigirá sesión siempre.
+    #[serde(default = "d_bind_tailnet")]
+    pub bind_tailnet: String,
     #[serde(default = "d_interval")]
     pub interval_secs: u64,
     #[serde(default)]
@@ -94,6 +98,9 @@ pub struct Rule {
 
 fn d_bind() -> String {
     "127.0.0.1:7777".into()
+}
+fn d_bind_tailnet() -> String {
+    "127.0.0.1:7778".into()
 }
 fn d_interval() -> u64 {
     2

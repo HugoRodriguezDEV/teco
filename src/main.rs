@@ -139,17 +139,43 @@ fn run(path: &Path, t0: Instant) {
             std::process::exit(1);
         }
     };
+    let tailnet = mon.cfg.bind_tailnet.trim().to_string();
+    let tailnet_listener = if tailnet.is_empty() {
+        None
+    } else if tailnet == bind {
+        eprintln!("teco: bind y bind_tailnet no pueden ser la misma dirección ({bind})");
+        std::process::exit(1);
+    } else {
+        match server::bind(&tailnet) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                eprintln!("teco: no pude escuchar en {tailnet}: {e}");
+                std::process::exit(1);
+            }
+        }
+    };
     mon.tick();
     mon.events.push(
         Kind::Info,
         "Teco despierto",
-        format!("panel en http://{bind} · config {} · arranque {} ms", path.display(), t0.elapsed().as_millis()),
+        format!(
+            "panel en http://{bind}{} · config {} · arranque {} ms",
+            if tailnet.is_empty() { String::new() } else { format!(" · tailnet → {tailnet}") },
+            path.display(),
+            t0.elapsed().as_millis()
+        ),
         0,
     );
     let mon = Arc::new(Mutex::new(mon));
-    if let Err(e) = server::spawn(listener, mon.clone()) {
+    if let Err(e) = server::spawn(listener, mon.clone(), server::Via::Local) {
         eprintln!("teco: no pude iniciar el panel: {e}");
         std::process::exit(1);
+    }
+    if let Some(l) = tailnet_listener {
+        if let Err(e) = server::spawn(l, mon.clone(), server::Via::Tailnet) {
+            eprintln!("teco: no pude iniciar el listener de la tailnet: {e}");
+            std::process::exit(1);
+        }
     }
     eprintln!("teco 🦉 vigilando · http://{bind} · {}", path.display());
     sample_loop(&mon, path, None);
@@ -192,7 +218,7 @@ fn reload(mon: &Mutex<Monitor>, path: &Path) {
     let mut m = lock(mon);
     match Config::parse(&text) {
         Ok(c) => {
-            let note = if c.bind != m.cfg.bind { " (bind cambia al reiniciar)" } else { "" };
+            let note = if c.bind != m.cfg.bind || c.bind_tailnet != m.cfg.bind_tailnet { " (bind cambia al reiniciar)" } else { "" };
             let n = c.rules.len();
             m.set_config(c);
             m.events.push(Kind::Info, "Config recargada", format!("{n} reglas{note}"), 0);
@@ -216,7 +242,7 @@ fn bench(path: &Path, secs: u64, t0: Instant) {
     let listener = server::bind("127.0.0.1:0").expect("puerto efímero");
     let addr = listener.local_addr().map(|a| a.to_string()).unwrap_or_default();
     let mon = Arc::new(Mutex::new(mon));
-    server::spawn(listener, mon.clone()).expect("panel");
+    server::spawn(listener, mon.clone(), server::Via::Local).expect("panel");
 
     println!("teco bench 🦉 · {secs} s · muestreo cada {interval} s · panel cerrado en http://{addr}");
     let cpu0 = own_cpu_ms();

@@ -2,7 +2,7 @@
 
 ## 1. Política de la tailnet
 
-- [ ] 1.1 Crear `deploy/tailscale/policy.hujson` con `tagOwners` (Hugo dueño de `tag:teco` y `tag:zotz`), `group:equipo` vacío y `grants` (Hugo → todo en ambas etiquetas; `tag:zotz` → `tag:teco` en 443); verificar que es HUJSON válido y que no contiene secretos con `grep -i tskey` sin resultados
+- [x] 1.1 Crear `deploy/tailscale/policy.hujson` con `tagOwners` (Hugo dueño de `tag:teco` y `tag:zotz`), `group:equipo` vacío y `grants` (Hugo → todo en ambas etiquetas; `tag:zotz` → `tag:teco` en 443); verificar que es HUJSON válido y que no contiene secretos con `grep -i tskey` sin resultados
 - [ ] 1.2 Documentar en `README.md` cómo pegar la política, crear las etiquetas y crear el OAuth client con permiso de escritura de dispositivos limitado a esas etiquetas; verificar siguiendo los pasos en la consola de Tailscale
 
 ## 2. Instalador de macOS
