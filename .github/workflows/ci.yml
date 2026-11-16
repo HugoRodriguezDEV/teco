@@ -56,11 +56,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          cp dist/teco-windows-latest/teco.exe out/teco-windows-x64.exe
-          cp dist/teco-macos-latest/teco       out/teco-macos-arm64
-          cp dist/teco-ubuntu-latest/teco      out/teco-linux-x64
-          cp dist/teco-macos-latest/dist/Teco-macos-arm64.zip out/Teco-macos-arm64.zip
-          cp dist/teco-windows-latest/teco-monitor.exe out/teco-monitor-windows-x64.exe
+          # La ruta dentro de cada artifact depende de qué archivos subió: se buscan por nombre.
+          pick() { f="$(find "dist/$1" -type f -name "$2" | head -1)"; [ -n "$f" ] || { echo "falta $2 en $1"; exit 1; }; cp "$f" "out/$3"; }
+          pick teco-windows-latest teco.exe              teco-windows-x64.exe
+          pick teco-windows-latest teco-monitor.exe      teco-monitor-windows-x64.exe
+          pick teco-macos-latest   teco                  teco-macos-arm64
+          pick teco-macos-latest   Teco-macos-arm64.zip  Teco-macos-arm64.zip
+          pick teco-ubuntu-latest  teco                  teco-linux-x64
           chmod +x out/teco-macos-arm64 out/teco-linux-x64
           cd out && for f in *; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done && ls -la
       - name: Publicar teco-latest
