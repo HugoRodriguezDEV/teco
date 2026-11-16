@@ -131,13 +131,12 @@ fn main() {
         match event {
             Event::NewEvents(StartCause::Init) => {
                 // En macOS el ícono debe crearse ya con el bucle corriendo.
-                let mut b = TrayIconBuilder::new()
-                    .with_menu(Box::new(menu.clone()))
-                    .with_tooltip("Teco")
-                    .with_icon(icon_for(Level::Ok));
-                if cfg!(target_os = "macos") {
-                    b = b.with_icon_as_template(true);
-                }
+                let b = TrayIconBuilder::new().with_menu(Box::new(menu.clone())).with_tooltip("Teco");
+                // macOS: el tecolote normal es "plantilla" (se adapta a la barra clara u oscura).
+                #[cfg(target_os = "macos")]
+                let b = b.with_icon_templated(icon_for(Level::Ok));
+                #[cfg(not(target_os = "macos"))]
+                let b = b.with_icon(icon_for(Level::Ok));
                 tray = b.build().ok();
                 current = Level::Ok;
                 if !tray_only {
@@ -149,8 +148,7 @@ fn main() {
                 if let Some(t) = &tray {
                     let _ = t.set_tooltip(Some(format!("Teco · {}", f.line)));
                     if f.level != current {
-                        let template = f.level == Level::Ok && cfg!(target_os = "macos");
-                        let _ = t.set_icon_with_as_template(Some(icon_for(f.level)), template);
+                        set_tray_icon(t, f.level);
                         current = f.level;
                     }
                 }
@@ -222,6 +220,14 @@ fn focus_app(target: &tao::event_loop::EventLoopWindowTarget<UserEvent>) {
 }
 #[cfg(not(target_os = "macos"))]
 fn focus_app(_: &tao::event_loop::EventLoopWindowTarget<UserEvent>) {}
+
+fn set_tray_icon(t: &TrayIcon, level: Level) {
+    let icon = Some(icon_for(level));
+    #[cfg(target_os = "macos")]
+    let _ = if level == Level::Ok { t.set_icon_templated(icon) } else { t.set_icon(icon) };
+    #[cfg(not(target_os = "macos"))]
+    let _ = t.set_icon(icon);
+}
 
 fn icon_for(level: Level) -> Icon {
     let bytes: &[u8] = match level {
