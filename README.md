@@ -102,7 +102,7 @@ Este equipo siempre aparece primero. Los demás se agregan en `teco.toml` (se re
 ```toml
 [[device]]
 name = "MSI"
-url = "https://msi.tu-tailnet.ts.net"   # origen del panel del nodo, sin ruta
+url = "https://msi-zotz.tail59ed16.ts.net"   # origen del panel del nodo, sin ruta
 ```
 
 El navegador pide a cada nodo `GET /api/summary`, un JSON chico sin procesos ni eventos. Los nodos solo lo comparten con orígenes de loopback, `localhost`, `*.ts.net` o IPs de Tailscale (CORS). Un nodo que no responde se reintenta cada ~15 s.
