@@ -210,29 +210,54 @@ fn route(
             }
             respond(s, head_only, 200, "application/json", json.as_bytes(), false)
         }
+        ("OPTIONS", "/api/kill") => {
+            // Preflight del tablero de otra máquina de la tailnet (o de esta misma).
+            match req.origin.filter(|o| peer_origin_ok(o, req.host)) {
+                Some(o) => {
+                    let extra = format!(
+                        "Access-Control-Allow-Origin: {o}\r\nAccess-Control-Allow-Methods: POST\r\n\
+                         Access-Control-Allow-Headers: X-Teco, Content-Type\r\nAccess-Control-Max-Age: 600\r\nVary: Origin\r\n"
+                    );
+                    respond_with(s, true, 204, "text/plain", b"", false, &extra)
+                }
+                None => respond(s, head_only, 403, "text/plain", b"origen no permitido", false),
+            }
+        }
         ("POST", "/api/kill") => {
-            // Anti-CSRF: exige cabecera propia (fuerza preflight, que no respondemos)
-            // y, si hay Origin, que coincida con Host.
+            // Anti-CSRF: exige cabecera propia (fuerza preflight) y que el Origin sea esta
+            // misma página u otra máquina de la misma tailnet (o loopback si se entró local).
             let same_origin = match (req.origin, req.host) {
                 (Some(o), Some(h)) => o.split("://").nth(1) == Some(h),
                 (None, _) => true,
                 _ => false,
             };
-            if !req.teco_header || !same_origin {
+            let peer = req.origin.filter(|o| !same_origin && peer_origin_ok(o, req.host));
+            if !req.teco_header || !(same_origin || peer.is_some()) {
                 return respond(s, head_only, 403, "text/plain", b"origen no permitido", false);
             }
+            let cors = peer.map(|o| format!("Access-Control-Allow-Origin: {o}\r\nVary: Origin\r\n")).unwrap_or_default();
             let body = std::str::from_utf8(req.body).unwrap_or("");
             let pid: Option<u32> = param(body, "pid").and_then(|v| v.parse().ok());
             let start: Option<u64> = param(body, "start").and_then(|v| v.parse().ok());
             let (Some(pid), Some(start)) = (pid, start) else {
-                return respond(s, head_only, 400, "text/plain", b"faltan pid y start", false);
+                return respond_with(s, head_only, 400, "text/plain", b"faltan pid y start", false, &cors);
             };
+            let force = param(body, "force") == Some("1");
+            let tree = param(body, "tree") == Some("1");
             let mut m = lock(mon);
             if !m.cfg.allow_kill_from_panel {
                 drop(m);
-                return respond(s, head_only, 403, "text/plain", b"allow_kill_from_panel = false en teco.toml", false);
+                return respond_with(
+                    s,
+                    head_only,
+                    403,
+                    "text/plain; charset=utf-8",
+                    "Terminar está desactivado en esa máquina (allow_kill_from_panel = false en su teco.toml)".as_bytes(),
+                    false,
+                    &cors,
+                );
             }
-            let r = m.kill(pid, start);
+            let r = m.kill_request(pid, start, force, tree);
             let (code, msg) = match r {
                 Ok(msg) => {
                     m.events.push(Kind::Kill, panel_title(req.via), msg.clone(), pid);
@@ -244,7 +269,7 @@ fn route(
                 }
             };
             drop(m);
-            respond(s, head_only, code, "text/plain; charset=utf-8", msg.as_bytes(), false)
+            respond_with(s, head_only, code, "text/plain; charset=utf-8", msg.as_bytes(), false, &cors)
         }
         ("GET", _) => respond(s, head_only, 404, "text/plain", b"no existe", false),
         _ => respond(s, head_only, 405, "text/plain", b"metodo no permitido", false),
@@ -303,6 +328,50 @@ fn cors_ok(origin: &str) -> bool {
     }
 }
 
+/// Nombre de host (sin esquema, puerto ni corchetes) en minúsculas.
+fn host_name(hostport: &str) -> String {
+    let n = if let Some(r) = hostport.strip_prefix('[') {
+        r.split(']').next().unwrap_or("")
+    } else {
+        hostport.rsplit_once(':').map(|(n, _)| n).unwrap_or(hostport)
+    };
+    n.trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn is_loopback_name(n: &str) -> bool {
+    n == "localhost" || n.ends_with(".localhost") || n.parse::<IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
+}
+
+/// Quién puede pedirle a esta máquina que termine un proceso desde otra página
+/// (el tablero de otra máquina). Más estricto que `cors_ok`:
+/// - si entraron por loopback, solo páginas de loopback (una página pública no llega);
+/// - si entraron por `x.<tailnet>.ts.net`, páginas de loopback o de la **misma** tailnet
+///   (no de cualquier `*.ts.net`, que incluye sitios públicos de Tailscale Funnel);
+/// - si entraron por una IP de Tailscale, páginas de loopback o de IPs de Tailscale.
+fn peer_origin_ok(origin: &str, host: Option<&str>) -> bool {
+    let Some(rest) = origin.strip_prefix("https://").or_else(|| origin.strip_prefix("http://")) else {
+        return false;
+    };
+    let o = host_name(rest);
+    if o.is_empty() {
+        return false;
+    }
+    if is_loopback_name(&o) {
+        return true;
+    }
+    let Some(h) = host.map(host_name) else { return false };
+    if h.ends_with(".ts.net") {
+        let suffix = |n: &str| n.split_once('.').map(|(_, d)| d.to_string()).unwrap_or_default();
+        return o.ends_with(".ts.net") && suffix(&o) == suffix(&h);
+    }
+    let ts_ip = |n: &str| match n.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => ip.octets()[0] == 100 && ip.octets()[1] & 0xC0 == 64,
+        Ok(IpAddr::V6(ip)) => ip.segments()[..3] == [0xfd7a, 0x115c, 0xa1e0],
+        Err(_) => false,
+    };
+    ts_ip(&h) && ts_ip(&o)
+}
+
 fn csp(connect: &str) -> String {
     format!(
         "default-src 'self'; connect-src 'self'{connect}; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:"
@@ -325,6 +394,7 @@ fn respond_with(
 ) -> std::io::Result<()> {
     let reason = match code {
         200 => "OK",
+        204 => "No Content",
         400 => "Bad Request",
         403 => "Forbidden",
         404 => "Not Found",
@@ -412,6 +482,22 @@ mod tests {
         for bad in ["https://evil.example.com", "http://8.8.8.8", "http://100.128.0.1", "null", "127.0.0.1"] {
             assert!(!cors_ok(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn kill_origins() {
+        let ts = Some("msi-zotz.tail59ed16.ts.net");
+        assert!(peer_origin_ok("http://127.0.0.1:7777", ts));
+        assert!(peer_origin_ok("https://macbook-pro-hugo.tail59ed16.ts.net", ts));
+        assert!(!peer_origin_ok("https://evil.tailabc.ts.net", ts), "otra tailnet / Funnel");
+        assert!(!peer_origin_ok("https://evil.example.com", ts));
+        let lo = Some("127.0.0.1:7777");
+        assert!(peer_origin_ok("http://localhost:7777", lo));
+        assert!(!peer_origin_ok("https://macbook-pro-hugo.tail59ed16.ts.net", lo), "por loopback solo loopback");
+        let ip = Some("100.79.158.43:7778");
+        assert!(peer_origin_ok("http://100.87.8.61:7777", ip));
+        assert!(!peer_origin_ok("http://8.8.8.8", ip));
+        assert!(!peer_origin_ok("null", ts));
     }
 
     #[test]

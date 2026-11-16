@@ -545,7 +545,43 @@ impl Monitor {
 
     /// Termina un proceso. Unix: SIGTERM y SIGKILL a los 5 s si sigue vivo.
     /// Windows: `TerminateProcess`. `start` evita matar a otro proceso con el PID reciclado.
+    /// Termina un proceso o, con `tree`, también a todos sus descendientes (primero los hijos).
+    /// Devuelve un resumen; falla solo si no se pudo terminar ninguno.
+    pub fn kill_request(&mut self, pid: u32, start: u64, force: bool, tree: bool) -> Result<String, String> {
+        // La raíz se valida primero: PID reciclado, protegidos, el propio teco…
+        let first = self.kill_one(pid, start, force)?;
+        if !tree {
+            return Ok(first);
+        }
+        // Descendientes según la última muestra.
+        let mut family: Vec<(u32, u64)> = Vec::new();
+        let mut frontier = vec![pid];
+        while let Some(parent) = frontier.pop() {
+            for r in self.rows.iter().filter(|r| r.ppid == parent && r.pid != parent) {
+                if family.len() < 512 && !family.iter().any(|(p, _)| *p == r.pid) {
+                    family.push((r.pid, r.start));
+                    frontier.push(r.pid);
+                }
+            }
+        }
+        let (mut ok, mut fail) = (1usize, 0usize);
+        for (p, st) in family.into_iter().rev() {
+            match self.kill_one(p, st, force) {
+                Ok(_) => ok += 1,
+                Err(_) => fail += 1,
+            }
+        }
+        let extra = if fail > 0 { format!(" ({fail} no se pudieron)") } else { String::new() };
+        Ok(format!("{first} · árbol: {ok} procesos{extra}"))
+    }
+
+    /// Termina un proceso. Unix: SIGTERM y SIGKILL a los 5 s si sigue vivo (o SIGKILL directo
+    /// con `force`). Windows: `TerminateProcess`. `start` evita matar a otro proceso con el PID reciclado.
     pub fn kill(&mut self, pid: u32, start: u64) -> Result<String, String> {
+        self.kill_one(pid, start, false)
+    }
+
+    fn kill_one(&mut self, pid: u32, start: u64, force: bool) -> Result<String, String> {
         let Some(p) = self.sys.process(Pid::from_u32(pid)) else {
             return Err(format!("{pid} ya no existe"));
         };
@@ -558,6 +594,13 @@ impl Monitor {
         }
         #[cfg(unix)]
         {
+            if force {
+                return if p.kill() {
+                    Ok(format!("SIGKILL a {name} ({pid})"))
+                } else {
+                    Err(format!("no pude matar {name} ({pid}) (¿permisos?)"))
+                };
+            }
             match p.kill_with(sysinfo::Signal::Term) {
                 Some(true) => {
                     self.pending_kills.push((pid, start, Instant::now() + KILL_GRACE));
@@ -574,7 +617,7 @@ impl Monitor {
         }
         #[cfg(not(unix))]
         {
-            let _ = KILL_GRACE;
+            let _ = (KILL_GRACE, force);
             if p.kill() {
                 Ok(format!("TerminateProcess a {name} ({pid})"))
             } else {
@@ -653,6 +696,46 @@ impl Monitor {
         json_num(out, (self.tracks.len() - fired) as f64);
         out.push_str(",\"os\":");
         json_str(out, std::env::consts::OS);
+        // Procesos que se están pasando (o están cerca) de una regla: para la botonera.
+        let mut list: Vec<(&Key, &Track)> = self.tracks.iter().filter(|(k, _)| k.rule < SYS_CPU).collect();
+        list.sort_by(|a, b| {
+            b.1.fired.cmp(&a.1.fired).then(b.1.ratio.partial_cmp(&a.1.ratio).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        out.push_str(",\"hot\":[");
+        for (i, (k, t)) in list.iter().take(8).enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            let state = if t.fired {
+                "fired"
+            } else if t.over_since.is_some() {
+                "pending"
+            } else {
+                "near"
+            };
+            out.push_str("{\"pid\":");
+            json_num(out, k.pid as f64);
+            out.push_str(",\"start\":");
+            json_num(out, k.start as f64);
+            out.push_str(",\"name\":");
+            json_str(out, &t.name);
+            out.push_str(",\"rule\":");
+            json_str(out, &t.rule_name);
+            out.push_str(",\"state\":");
+            json_str(out, state);
+            out.push_str(",\"value_txt\":");
+            json_str(out, &t.metric.fmt(t.value));
+            out.push_str(",\"limit_txt\":");
+            json_str(out, &t.metric.fmt_limit(t.limit));
+            out.push_str(",\"members\":");
+            json_num(out, t.members as f64);
+            if let Some(why) = self.kill_blocker(k.pid, &t.name) {
+                out.push_str(",\"locked\":");
+                json_str(out, why);
+            }
+            out.push('}');
+        }
+        out.push(']');
         out.push('}');
     }
 

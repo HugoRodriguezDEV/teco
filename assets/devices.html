@@ -25,7 +25,7 @@ header svg{width:28px;height:28px;flex:none}
 header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
 header .sum{color:var(--mute);font-size:13px;margin-left:auto;text-align:right;white-space:nowrap}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.dev{display:block;color:inherit;text-decoration:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;transition:border-color .15s,transform .15s}
+.dev{display:block;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;transition:border-color .15s,transform .15s}
 .dev:hover{border-color:var(--accent)}
 .dev:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .dev.s-alert{border-color:var(--bad)}
@@ -46,8 +46,22 @@ header .sum{color:var(--mute);font-size:13px;margin-left:auto;text-align:right;w
 .fill{height:100%;width:0;border-radius:5px;background:var(--ok);transition:width .4s}
 .fill.warn{background:var(--warn)}.fill.bad{background:var(--bad)}
 .lim{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--mute);opacity:.55}
+.hot{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:6px}
+.hot li{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center;border-radius:8px;padding:7px 9px;background:var(--warn-bg)}
+.hot li.fired{background:var(--bad-bg)}
+.hot .pn{font-weight:600;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hot .pn em{font-style:normal;font-weight:400;color:var(--mute)}
+.hot .pv{grid-column:1;color:var(--mute);font-size:12px}
+.hot .acts{grid-column:2;grid-row:1/3;display:flex;gap:6px}
+.act{font:inherit;font-size:12px;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:6px;padding:4px 9px;cursor:pointer}
+.act.kill{color:#fff;background:var(--bad);border-color:var(--bad)}
+.act:hover{filter:brightness(1.08)}.act:disabled{opacity:.5;cursor:not-allowed}
+.act:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.hot .why{grid-column:2;grid-row:1/3;font-size:11.5px;color:var(--mute);max-width:140px;text-align:right}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:var(--card);padding:10px 14px;border-radius:10px;max-width:calc(100% - 32px);display:none;z-index:9}
 .foot{display:flex;justify-content:space-between;gap:8px;margin-top:14px;color:var(--mute);font-size:12.5px}
-.foot .go{color:var(--accent);font-weight:600}
+.foot .go{color:var(--accent);font-weight:600;text-decoration:none}
+.foot .go:hover{text-decoration:underline}
 .s-off .bars{opacity:.35}
 .empty{color:var(--mute);background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:16px;font-size:13px}
 .empty code{background:var(--bar);border-radius:4px;padding:1px 5px;font-size:12.5px}
@@ -65,6 +79,7 @@ header .sum{color:var(--mute);font-size:13px;margin-left:auto;text-align:right;w
   <p class="empty" id="hint" hidden>Solo aparece este equipo. Instala Teco en otra máquina de tu tailnet
     con el comando de una línea del README y aparecerá aquí sola.</p>
 </main>
+<div class="toast" id="toast" role="status"></div>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -110,8 +125,8 @@ function card(d) {
   else if (x.alerts_fired) foot = x.alerts_fired + (x.alerts_fired === 1 ? " alerta activa" : " alertas activas");
   else if (x.alerts_near) foot = x.alerts_near + " cerca del límite";
   else foot = x.proc_count + " procesos";
-  // El <a> se crea una vez y se reutiliza: así no se pierde el foco ni el hover al refrescar.
-  if (!d.el) { d.el = document.createElement("a"); d.el.href = link(d); }
+  // La tarjeta se crea una vez y se reutiliza: así no se pierde el foco al refrescar.
+  if (!d.el) d.el = document.createElement("div");
   d.el.className = "dev s-" + status;
   d.el.innerHTML = '<div class="top"><div class="who"><b>' + esc(title) + '</b><small>' + esc(sub) + '</small></div>'
     + '<span class="pill">' + TEXT[status] + '</span></div>'
@@ -119,9 +134,51 @@ function card(d) {
     + bar(s.cpu, s.lim_cpu, x ? s.cpu.toFixed(0) + " %" : "—", "CPU")
     + bar(memPct, s.lim_mem, x ? fmtB(s.mem_used) + " / " + fmtB(s.mem_total) : "—", "RAM")
     + bar(swapPct, swapLim, x ? (s.swap_total ? fmtB(s.swap_used) + " / " + fmtB(s.swap_total) : "sin swap") : "—", "Swap")
-    + '</div><div class="foot"><span>' + esc(foot) + '</span><span class="go">Ver procesos →</span></div>';
+    + '</div>' + hotList(d)
+    + '<div class="foot"><span>' + esc(foot) + '</span><a class="go" href="' + esc(link(d)) + '">Ver procesos →</a></div>';
   return d.el;
 }
+
+// Procesos que se pasan (o están por pasarse) de un límite, con su botonera.
+function hotList(d) {
+  const x = d.data;
+  if (!d.ok || !x || !x.hot || !x.hot.length) return "";
+  return '<ul class="hot">' + x.hot.map(h => {
+    const tree = h.members > 1;
+    const who = esc(h.name) + ' <em>(' + h.pid + ')</em>' + (tree ? ' <em>+' + (h.members - 1) + '</em>' : '');
+    const data = ' data-url="' + esc(d.url) + '" data-pid="' + h.pid + '" data-start="' + h.start
+      + '" data-name="' + esc(h.name) + '" data-tree="' + (tree ? 1 : 0) + '" data-host="' + esc(x.host) + '"';
+    let acts;
+    if (h.locked) acts = '<span class="why">protegido: ' + esc(h.locked) + '</span>';
+    else if (!x.allow_kill) acts = '<span class="why">Terminar desactivado en esta máquina</span>';
+    else acts = '<span class="acts"><button class="act" data-force="0"' + data + ' title="Pide al proceso que cierre; si no responde en 5 s, se fuerza">Detener</button>'
+      + '<button class="act kill" data-force="1"' + data + ' title="Lo cierra de inmediato">Matar</button></span>';
+    return '<li class="' + h.state + '"><span class="pn">' + who + '</span>' + acts
+      + '<span class="pv">' + esc(h.rule) + ' · ' + esc(h.value_txt) + ' / ' + esc(h.limit_txt) + '</span></li>';
+  }).join("") + '</ul>';
+}
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 5000);
+}
+
+$("grid").addEventListener("click", async e => {
+  const b = e.target.closest("button.act");
+  if (!b || b.disabled) return;
+  const v = b.dataset, force = v.force === "1", tree = v.tree === "1";
+  const what = (force ? "¿Matar" : "¿Detener") + " " + v.name + " (" + v.pid + ")" + (tree ? " y sus procesos hijos" : "")
+    + " en " + v.host + "?";
+  if (!confirm(what)) return;
+  b.disabled = true;
+  try {
+    const r = await fetch(v.url + "/api/kill", {method: "POST", cache: "no-store",
+      headers: {"X-Teco": "1", "Content-Type": "application/x-www-form-urlencoded"},
+      body: "pid=" + v.pid + "&start=" + v.start + (force ? "&force=1" : "") + (tree ? "&tree=1" : "")});
+    toast(await r.text());
+  } catch (err) { toast("No se pudo contactar a " + v.host + "."); }
+  poll();
+});
 
 const visible = d => d.self || !d.auto || d.teco || d.seen;
 

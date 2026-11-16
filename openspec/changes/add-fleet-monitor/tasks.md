@@ -13,3 +13,10 @@
 - [x] 2.2 `Teco.app` (`monitor/macos/`): Info.plist con `LSUIElement`, ícono `.icns`, firma ad hoc y zip; CI y Release
 - [x] 2.3 `install.sh` instala `Teco.app` y registra los LaunchAgents del vigilante y del monitor; verificar con simulación (idempotente)
 - [ ] 2.4 Probar en la Mac: el ícono cambia de color, la ventana abre y cierra, no aparece en el Dock, cerrar Tailscale lo vuelve a abrir, y reiniciar la sesión abre el monitor
+
+## 3. Botonera
+
+- [x] 3.1 `/api/summary` incluye `hot` (procesos que se pasan, con `locked`) y `/api/kill` acepta `force` y `tree`
+- [x] 3.2 CORS y preflight de `/api/kill` solo para loopback y la misma tailnet; prueba unitaria con orígenes de Funnel
+- [x] 3.3 Tablero y `/equipo` con "Detener" y "Matar"; verificar en navegador matando un árbol de 3 procesos
+- [ ] 3.4 Probar desde la Mac matando un proceso de prueba en la MSI

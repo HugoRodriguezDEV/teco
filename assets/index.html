@@ -75,7 +75,10 @@ td.cmd{color:var(--mute);max-width:380px;overflow:hidden;text-overflow:ellipsis;
 tr.near td{background:var(--warn-bg)}tr.over td{background:var(--bad-bg)}
 tr.near td:first-child{box-shadow:inset 3px 0 var(--warn)}tr.over td:first-child{box-shadow:inset 3px 0 var(--bad)}
 .kill{font:inherit;font-size:12px;border:1px solid var(--line);background:transparent;color:var(--bad);border-radius:6px;padding:3px 9px;cursor:pointer}
-.kill:hover{background:var(--bad-bg)}.kill:disabled{color:var(--mute);cursor:not-allowed;background:none}
+.kill:hover{background:var(--bad-bg)}
+.kill.force{background:var(--bad);border-color:var(--bad);color:#fff}.kill.force:hover{filter:brightness(1.08)}
+td .kill+.kill{margin-left:4px}
+.alert .acts{display:inline-flex;gap:6px;margin-left:10px;vertical-align:middle}.kill:disabled{color:var(--mute);cursor:not-allowed;background:none}
 .events{list-style:none;margin:0;padding:0;max-height:360px;overflow:auto}
 .events li{display:grid;grid-template-columns:62px 82px 1fr;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
 .events time{color:var(--mute);font-variant-numeric:tabular-nums}
@@ -208,10 +211,12 @@ function render(d) {
     if (a.members > 1) extra.push(a.members + " procesos");
     const when = a.state === "fired" || a.state === "recovering" ? "disparada " + ago(a.fired_at, now) + " · arriba desde " + ago(a.since, now)
       : a.state === "pending" ? "arriba del límite " + ago(a.since, now) : Math.round(a.ratio * 100) + " % del límite";
+    const acts = !a.sys && d.allow_kill && a.state !== "near"
+      ? '<span class="acts">' + killButtons(a.pid, a.start, a.name, a.members > 1) + '</span>' : '';
     return '<div class="alert ' + a.state + '"><span class="tag">' + LABEL[a.state] + '</span>'
       + '<span class="what">' + esc(a.rule) + ' · ' + who + '</span>'
       + '<span class="val">' + esc(a.value_txt) + ' <em style="font-weight:400;color:var(--mute)">/ ' + esc(a.limit_txt) + '</em></span>'
-      + '<span class="meta">' + [when].concat(extra).join(" · ") + '</span></div>';
+      + '<span class="meta">' + [when].concat(extra).join(" · ") + acts + '</span></div>';
   }).join("") : '<div class="empty">Sin alertas. El tecolote está tranquilo.</div>';
 
   // Procesos
@@ -219,8 +224,8 @@ function render(d) {
   $("procs").innerHTML = d.procs.map(p => {
     const cls = p.heat >= 1 ? "over" : p.heat >= 0.8 ? "near" : "";
     let kill = "";
-    if (d.allow_kill) kill = p.locked ? '<button class="kill" disabled title="' + esc(p.locked) + '">Terminar</button>'
-      : '<button class="kill" data-pid="' + p.pid + '" data-start="' + p.start + '" data-name="' + esc(p.name) + '">Terminar</button>';
+    if (d.allow_kill) kill = p.locked ? '<button class="kill" disabled title="' + esc(p.locked) + '">Protegido</button>'
+      : killButtons(p.pid, p.start, p.name, false);
     const app = !p.app ? '<td class="app none">—</td>'
       : p.app_via ? '<td class="app via" title="Lanzado desde ' + esc(p.app) + '">↳ ' + esc(p.app) + '</td>'
       : '<td class="app">' + esc(p.app) + '</td>';
@@ -276,14 +281,22 @@ function toast(msg) {
   const t = $("toast"); t.textContent = msg; t.style.display = "block";
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 4000);
 }
-$("procs").addEventListener("click", async e => {
+// Detener = cierre ordenado (SIGTERM y, si no responde en 5 s, SIGKILL); Matar = inmediato.
+// En Windows los dos usan TerminateProcess. Con tree=1 se incluye a los procesos hijos.
+function killButtons(pid, start, name, tree) {
+  const data = ' data-pid="' + pid + '" data-start="' + start + '" data-name="' + esc(name) + '" data-tree="' + (tree ? 1 : 0) + '"';
+  return '<button class="kill" data-force="0"' + data + ' title="Pide al proceso que cierre; si no responde en 5 s, se fuerza">Detener</button> '
+    + '<button class="kill force" data-force="1"' + data + ' title="Lo cierra de inmediato">Matar</button>';
+}
+document.addEventListener("click", async e => {
   const b = e.target.closest("button.kill");
-  if (!b || b.disabled) return;
-  if (!confirm("¿Terminar " + b.dataset.name + " (" + b.dataset.pid + ")?")) return;
+  if (!b || b.disabled || !b.dataset.pid) return;
+  const v = b.dataset, force = v.force === "1", tree = v.tree === "1";
+  if (!confirm((force ? "¿Matar " : "¿Detener ") + v.name + " (" + v.pid + ")" + (tree ? " y sus procesos hijos" : "") + "?")) return;
   b.disabled = true;
   try {
     const r = await fetch("/api/kill", {method: "POST", headers: {"X-Teco": "1", "Content-Type": "application/x-www-form-urlencoded"},
-      body: "pid=" + b.dataset.pid + "&start=" + b.dataset.start});
+      body: "pid=" + v.pid + "&start=" + v.start + (force ? "&force=1" : "") + (tree ? "&tree=1" : "")});
     toast(await r.text());
   } catch (err) { toast("No se pudo: " + err); }
   poll();
