@@ -6,6 +6,9 @@
 #   APP=zotz BIN=./zotz SERVE_HTTPS_PORT=8443 SERVE_TARGET=http://127.0.0.1:8788 \
 #     LABEL=dev.hugorodriguez.zotz ./deploy/install.sh
 #
+# Sin clonar nada:
+#   curl -fsSL https://raw.githubusercontent.com/HugoRodriguezDEV/teco/HEAD/deploy/install.sh | bash
+#
 # El secreto de Tailscale (solo para máquinas sin sesión) se lee de la variable
 # TS_OAUTH_SECRET o de ~/.config/zotz-nodes/tailscale.secret. Nunca se imprime.
 set -euo pipefail
@@ -20,6 +23,10 @@ TS_HOSTNAME="${TS_HOSTNAME:-macbook-pro-hugo}"
 SERVE_HTTPS_PORT="${SERVE_HTTPS_PORT:-443}"
 SERVE_TARGET="${SERVE_TARGET:-http://127.0.0.1:7778}"
 SECRET_FILE="${SECRET_FILE:-$HOME/.config/zotz-nodes/tailscale.secret}"
+RELEASE_URL="${RELEASE_URL:-https://github.com/HugoRodriguezDEV/teco/releases/download/teco-latest/teco-macos-arm64}"
+# Configuración que el instalador garantiza en teco.toml (el resto se respeta).
+ALLOW_KILL="${ALLOW_KILL:-true}"
+DEVICES="${DEVICES:-MSI=https://msi-zotz.tail59ed16.ts.net Mac=https://macbook-pro-hugo.tail59ed16.ts.net}"
 TAILNET="tail59ed16.ts.net"
 
 say()  { printf '\033[1m🦉 %s\033[0m\n' "$*"; }
@@ -72,11 +79,22 @@ fi
 
 # ---------------------------------------------------------------- binario
 say "Binario"
-if [[ ! -x "$BIN" && "$APP" == "teco" && -f Cargo.toml ]]; then
-  command -v cargo >/dev/null 2>&1 || die "No encuentro $BIN ni cargo. Instala Rust (https://rustup.rs) o pasa BIN=/ruta/al/binario."
-  cargo build --release
+TMP_BIN=""
+if [[ ! -x "$BIN" ]]; then
+  if [[ "$APP" == "teco" ]]; then
+    # Sin build local: el binario publicado en el Release, verificado con su SHA-256.
+    TMP_BIN="$(mktemp)"
+    curl -fsSL "$RELEASE_URL" -o "$TMP_BIN" || die "No pude descargar $RELEASE_URL."
+    want="$(curl -fsSL "$RELEASE_URL.sha256" | tr -d '[:space:]')" || die "No pude descargar la huella SHA-256."
+    got="$(shasum -a 256 < "$TMP_BIN" | cut -d' ' -f1)"
+    [[ "$got" == "$want" ]] || { rm -f "$TMP_BIN"; die "La huella SHA-256 no coincide; no se instala."; }
+    chmod 755 "$TMP_BIN"
+    BIN="$TMP_BIN"
+    skip "descargado del Release y verificado (SHA-256)"
+  else
+    die "No encuentro el binario $BIN (pásalo con BIN=...)."
+  fi
 fi
-[[ -x "$BIN" ]] || die "No encuentro el binario $BIN (pásalo con BIN=...)."
 mkdir -p "$INSTALL_DIR"
 DEST="$INSTALL_DIR/$APP"
 changed=0
@@ -90,10 +108,34 @@ else
 fi
 
 # ---------------------------------------------------------------- configuración
+[[ -n "$TMP_BIN" ]] && rm -f "$TMP_BIN"
+
 if [[ "$APP" == "teco" ]]; then
   say "Configuración"
   # `teco check` crea teco.toml con los valores por defecto solo si no existe.
-  "$DEST" check >/dev/null && skip "$("$DEST" config-path)"
+  "$DEST" check >/dev/null
+  CFG="$("$DEST" config-path)"
+  cp "$CFG" "$CFG.bak"
+  if grep -qE '^[[:space:]]*allow_kill_from_panel[[:space:]]*=' "$CFG"; then
+    sed -E "s/^([[:space:]]*allow_kill_from_panel[[:space:]]*=[[:space:]]*)(true|false)/\1$ALLOW_KILL/" "$CFG.bak" > "$CFG"
+  else
+    printf 'allow_kill_from_panel = %s\n%s' "$ALLOW_KILL" "$(cat "$CFG")" > "$CFG"
+  fi
+  self_dns="$("$TS" status --json 2>/dev/null | grep -o '"DNSName": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)\."$/\1/')"
+  for d in $DEVICES; do
+    name="${d%%=*}"; url="${d#*=}"
+    [[ -n "$self_dns" && "$url" == *"$self_dns"* ]] && continue
+    grep -qF "$url" "$CFG" && continue
+    printf '\n[[device]]\nname = "%s"\nurl = "%s"\n' "$name" "$url" >> "$CFG"
+  done
+  if cmp -s "$CFG" "$CFG.bak"; then
+    skip "ya al día ($CFG)"
+  elif "$DEST" check >/dev/null; then
+    skip "actualizada: terminar desde el panel = $ALLOW_KILL, dispositivos al día ($CFG)"
+  else
+    mv -f "$CFG.bak" "$CFG"; die "La configuración resultante no es válida; se dejó la anterior."
+  fi
+  rm -f "$CFG.bak"
 fi
 
 # ---------------------------------------------------------------- arranque automático
