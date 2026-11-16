@@ -9,8 +9,11 @@
 # Sin clonar nada:
 #   curl -fsSL https://raw.githubusercontent.com/HugoRodriguezDEV/teco/HEAD/deploy/install.sh | bash
 #
-# El secreto de Tailscale (solo para máquinas sin sesión) se lee de la variable
-# TS_OAUTH_SECRET o de ~/.config/zotz-nodes/tailscale.secret. Nunca se imprime.
+# Si la máquina no está en Tailscale, se abre el inicio de sesión para que entres con TU
+# cuenta. Instalación desatendida en una red propia (opcional, nunca va en el repo):
+#   ~/.config/zotz-nodes/tailscale.secret   secreto de un OAuth client de Tailscale
+#   ~/.config/zotz-nodes/profile.env        TAGS=tag:teco,...  HOSTNAME=...  ALLOW_KILL=true
+# Con ambos, la máquina entra sola a esa tailnet, etiquetada y sin abrir sesión.
 set -euo pipefail
 
 APP="${APP:-teco}"
@@ -18,18 +21,19 @@ LABEL="${LABEL:-dev.hugorodriguez.$APP}"
 BIN="${BIN:-./target/release/$APP}"
 ARGS="${ARGS:-run}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/Library/Application Support/$APP/bin}"
-TAGS="${TAGS:-tag:$APP}"
-TS_HOSTNAME="${TS_HOSTNAME:-macbook-pro-hugo}"
+TAGS="${TAGS:-}"
+TS_HOSTNAME="${TS_HOSTNAME:-}"
 SERVE_HTTPS_PORT="${SERVE_HTTPS_PORT:-443}"
 SERVE_TARGET="${SERVE_TARGET:-http://127.0.0.1:7778}"
 SECRET_FILE="${SECRET_FILE:-$HOME/.config/zotz-nodes/tailscale.secret}"
+PROFILE_FILE="${PROFILE_FILE:-$HOME/.config/zotz-nodes/profile.env}"
 RELEASE_ZIP="${RELEASE_ZIP:-https://github.com/HugoRodriguezDEV/teco/releases/download/teco-latest/Teco-macos-arm64.zip}"
 # Teco.app (vigilante + monitor de barra de menú). /Applications si se puede escribir.
 APPS_DIR="${APPS_DIR:-$([[ -w /Applications ]] && echo /Applications || echo "$HOME/Applications")}"
-# Configuración que el instalador garantiza en teco.toml (el resto se respeta).
-ALLOW_KILL="${ALLOW_KILL:-true}"
-DEVICES="${DEVICES:-MSI=https://msi-zotz.tail59ed16.ts.net Mac=https://macbook-pro-hugo.tail59ed16.ts.net}"
-TAILNET="tail59ed16.ts.net"
+# "true"/"false" fija allow_kill_from_panel en teco.toml; vacío no lo toca.
+ALLOW_KILL="${ALLOW_KILL:-}"
+# Nodos extra ("Nombre=https://..."); los de la tailnet se descubren solos.
+DEVICES="${DEVICES:-}"
 TS_APP="${TS_APP:-/Applications/Tailscale.app}"
 
 say()  { printf '\033[1m🦉 %s\033[0m\n' "$*"; }
@@ -37,6 +41,18 @@ skip() { printf '   ✓ %s\n' "$*"; }
 die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
 
 [[ "$(uname -s)" == "Darwin" ]] || die "Este instalador es para macOS. En Windows usa deploy/install.ps1."
+
+# Perfil local de la red propia: solo datos (CLAVE=valor), nunca se ejecuta.
+if [[ -f "$PROFILE_FILE" ]]; then
+  while IFS='=' read -r k v; do
+    v="$(printf '%s' "$v" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    case "$k" in
+      TAGS) [[ -n "$TAGS" ]] || TAGS="$v" ;;
+      HOSTNAME) [[ -n "$TS_HOSTNAME" ]] || TS_HOSTNAME="$v" ;;
+      ALLOW_KILL) [[ -n "$ALLOW_KILL" ]] || ALLOW_KILL="$v" ;;
+    esac
+  done < "$PROFILE_FILE"
+fi
 
 # ---------------------------------------------------------------- Tailscale
 say "Tailscale"
@@ -76,14 +92,15 @@ if [[ "$st" != "Running" && -d "$TS_APP" ]]; then
     [[ "$st" == "Running" ]] && skip "Tailscale reconectado"
   fi
 fi
+host_args=()
+[[ -n "$TS_HOSTNAME" ]] && host_args=(--hostname="$TS_HOSTNAME")
 if [[ "$st" == "Running" ]]; then
   # Ya hay sesión (de usuario o etiquetada): no se toca.
   skip "ya está en la tailnet; no se cambia la sesión"
 else
   secret="${TS_OAUTH_SECRET:-}"
   if [[ -z "$secret" && -f "$SECRET_FILE" ]]; then secret="$(tr -d '[:space:]' < "$SECRET_FILE")"; fi
-  if [[ -z "$secret" && -r /dev/tty ]]; then
-    # Se pide una sola vez, sin mostrarlo, y se guarda solo para este usuario.
+  if [[ -z "$secret" && "${ASK_SECRET:-}" == 1 && -r /dev/tty ]]; then
     printf '   Pega el secreto de Tailscale (tskey-client-...). No se mostrará: '
     read -rs secret < /dev/tty; echo
     secret="$(printf '%s' "$secret" | tr -d '[:space:]')"
@@ -93,12 +110,20 @@ else
       skip "secreto guardado en $SECRET_FILE (no se vuelve a pedir)"
     fi
   fi
-  [[ -n "$secret" ]] || die "La máquina no está en la tailnet y no hay secreto. Define TS_OAUTH_SECRET o guárdalo en $SECRET_FILE (chmod 600)."
-  # Un secreto de OAuth client necesita estos parámetros; una auth key normal no.
-  if [[ "$secret" == tskey-client-* ]]; then secret="${secret}?ephemeral=false&preauthorized=true"; fi
-  "$TS" up --auth-key="$secret" --advertise-tags="$TAGS" --hostname="$TS_HOSTNAME"
-  unset secret
-  skip "unida como $TS_HOSTNAME.$TAILNET con $TAGS"
+  if [[ -n "$secret" ]]; then
+    # Red propia: unión desatendida y etiquetada.
+    [[ -n "$TAGS" ]] || die "Hay secreto de Tailscale pero faltan las etiquetas: ponlas en $PROFILE_FILE (TAGS=tag:teco) o con TAGS=..."
+    if [[ "$secret" == tskey-client-* ]]; then secret="${secret}?ephemeral=false&preauthorized=true"; fi
+    "$TS" up --auth-key="$secret" --advertise-tags="$TAGS" ${host_args[@]+"${host_args[@]}"}
+    unset secret
+    skip "unida a tu tailnet con $TAGS (desatendida)"
+  else
+    # Cualquier otra persona: inicia sesión con SU cuenta de Tailscale.
+    printf '   Inicia sesión en Tailscale con tu cuenta: abre el enlace que aparece abajo (o la ventana de Tailscale).\n'
+    [[ -d "$TS_APP" ]] && open -a "$TS_APP" || true
+    "$TS" up ${host_args[@]+"${host_args[@]}"} || die "No se completó el inicio de sesión en Tailscale. Vuelve a correr el instalador."
+    skip "conectada a tu cuenta de Tailscale"
+  fi
 fi
 
 # ---------------------------------------------------------------- tailscale serve
@@ -162,11 +187,14 @@ if [[ "$APP" == "teco" ]]; then
   "$DEST" check >/dev/null
   CFG="$("$DEST" config-path)"
   cp "$CFG" "$CFG.bak"
-  if grep -qE '^[[:space:]]*allow_kill_from_panel[[:space:]]*=' "$CFG"; then
-    sed -E "s/^([[:space:]]*allow_kill_from_panel[[:space:]]*=[[:space:]]*)(true|false)/\1$ALLOW_KILL/" "$CFG.bak" > "$CFG"
-  else
-    printf 'allow_kill_from_panel = %s\n%s' "$ALLOW_KILL" "$(cat "$CFG")" > "$CFG"
-  fi
+  case "$ALLOW_KILL" in
+    true|false)
+      if grep -qE '^[[:space:]]*allow_kill_from_panel[[:space:]]*=' "$CFG"; then
+        sed -E "s/^([[:space:]]*allow_kill_from_panel[[:space:]]*=[[:space:]]*)(true|false)/\1$ALLOW_KILL/" "$CFG.bak" > "$CFG"
+      else
+        printf 'allow_kill_from_panel = %s\n%s' "$ALLOW_KILL" "$(cat "$CFG")" > "$CFG"
+      fi ;;
+  esac
   self_dns="$("$TS" status --json 2>/dev/null | grep -o '"DNSName": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)\."$/\1/')"
   for d in $DEVICES; do
     name="${d%%=*}"; url="${d#*=}"
@@ -177,7 +205,7 @@ if [[ "$APP" == "teco" ]]; then
   if cmp -s "$CFG" "$CFG.bak"; then
     skip "ya al día ($CFG)"
   elif "$DEST" check >/dev/null; then
-    skip "actualizada: terminar desde el panel = $ALLOW_KILL, dispositivos al día ($CFG)"
+    skip "actualizada ($CFG)"
   else
     mv -f "$CFG.bak" "$CFG"; die "La configuración resultante no es válida; se dejó la anterior."
   fi

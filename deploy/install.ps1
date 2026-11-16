@@ -1,4 +1,4 @@
-﻿﻿# Instalador de nodo para Windows: deja la máquina lista con un solo comando.
+﻿# Instalador de nodo para Windows: deja la máquina lista con un solo comando.
 # Idempotente: correrlo varias veces deja siempre el mismo estado.
 #
 # Sin clonar nada (PowerShell normal; Windows pedirá permiso para instalar Tailscale):
@@ -7,9 +7,14 @@
 # Desde el repo:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\install.ps1
 #
-# Qué hace: instala Tailscale, une la máquina a la tailnet (pide el secreto una sola vez
-# si hace falta), publica Teco (y Zotz si está instalado) por HTTPS dentro de la tailnet,
-# descarga e instala Teco, deja su configuración lista y lo registra para arrancar solo.
+# Qué hace: instala Tailscale, conecta la máquina a TU cuenta de Tailscale (si no lo está,
+# abre el inicio de sesión), publica Teco (y Zotz si está instalado) por HTTPS dentro de tu
+# tailnet, descarga e instala Teco y lo registra para arrancar solo.
+#
+# Instalación desatendida en una red propia (opcional, nunca va en el repo):
+#   %LOCALAPPDATA%\zotz-nodes\tailscale.secret   secreto de un OAuth client de Tailscale
+#   %LOCALAPPDATA%\zotz-nodes\profile.env        TAGS=tag:teco,...  HOSTNAME=...  ALLOW_KILL=true
+# Con ambos, la máquina entra sola a esa tailnet, etiquetada y sin abrir sesión.
 [CmdletBinding()]
 param(
     # Ruta a un teco.exe propio. Si no se da: build local del repo o, si no hay, el Release.
@@ -17,29 +22,46 @@ param(
     [string]$ReleaseUrl = "https://github.com/HugoRodriguezDEV/teco/releases/download/teco-latest/teco-windows-x64.exe",
     [string]$InstallDir = "$env:LOCALAPPDATA\teco",
     [string]$TaskName = "Teco",
-    # La MSI corre Teco y Zotz: lleva las dos etiquetas desde el primer registro.
-    [string]$Tags = "tag:teco,tag:zotz",
-    [string]$Hostname = "msi-zotz",
+    # Solo para unión desatendida con secreto (o vienen del perfil local).
+    [string]$Tags = "",
+    [string]$Hostname = "",
     [int]$ServeHttpsPort = 443,
     [string]$ServeTarget = "http://127.0.0.1:7778",
     # Zotz: si está instalado, se publica también (https:8443 -> 127.0.0.1:6768).
     [int]$ZotzHttpsPort = 8443,
     [string]$ZotzTarget = "http://127.0.0.1:6768",
-    # Configuración que el instalador garantiza en teco.toml (el resto se respeta).
-    [bool]$AllowKill = $true,
-    [string[]]$Devices = @("MSI=https://msi-zotz.tail59ed16.ts.net", "Mac=https://macbook-pro-hugo.tail59ed16.ts.net"),
-    [string]$SecretFile = "$env:LOCALAPPDATA\zotz-nodes\tailscale.secret"
+    # "true"/"false" fija allow_kill_from_panel en teco.toml; "" no lo toca.
+    [string]$AllowKill = "",
+    # Nodos extra para la vista de Dispositivos ("Nombre=https://..."); los de la tailnet
+    # se descubren solos, así que normalmente no hace falta.
+    [string[]]$Devices = @(),
+    [string]$SecretFile = "$env:LOCALAPPDATA\zotz-nodes\tailscale.secret",
+    [string]$ProfileFile = "$env:LOCALAPPDATA\zotz-nodes\profile.env",
+    # Pide el secreto (en vez de abrir el inicio de sesión) si la máquina no está en la tailnet.
+    [switch]$AskSecret
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest es lentísimo con la barra
-$Tailnet = "tail59ed16.ts.net"
 
 function Say($m)  { Write-Host "🦉 $m" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "   ✓ $m" }
 function Warn($m) { Write-Host "   ⚠ $m" -ForegroundColor Yellow }
 # `throw` y no `exit`: ejecutado con irm, `exit` cerraría la ventana de PowerShell.
 function Die($m)  { Write-Host "❌ $m" -ForegroundColor Red; throw "Instalación detenida." }
+
+# Perfil local de la red propia: solo datos (CLAVE=valor), nunca se ejecuta.
+if (Test-Path $ProfileFile) {
+    foreach ($line in Get-Content $ProfileFile) {
+        if ($line -match '^\s*([A-Z_]+)\s*=\s*(.*?)\s*$') {
+            switch ($Matches[1]) {
+                "TAGS"       { if (-not $Tags) { $Tags = $Matches[2] } }
+                "HOSTNAME"   { if (-not $Hostname) { $Hostname = $Matches[2] } }
+                "ALLOW_KILL" { if (-not $AllowKill) { $AllowKill = $Matches[2] } }
+            }
+        }
+    }
+}
 
 # ------------------------------------------------------------------ Tailscale
 Say "Tailscale"
@@ -80,32 +102,44 @@ $status = Get-TsStatus
 if ($status -and $status.BackendState -eq "Running") {
     # Ya hay sesión (de usuario o etiquetada): no se toca.
     Ok "ya está en la tailnet como $($status.Self.DNSName.TrimEnd('.')); no se cambia la sesión"
-    if (-not $status.Self.Tags) {
-        Warn "Esta máquina está a nombre de una cuenta personal, sin etiquetas: su llave caduca y no se llamará $Hostname."
-        Warn "Para dejarla como nodo 24/7, corre 'tailscale logout' aquí mismo y vuelve a ejecutar este instalador."
+    if ($Tags -and -not $status.Self.Tags) {
+        Warn "Tu perfil pide etiquetas ($Tags) pero esta máquina está a nombre de una cuenta personal."
+        Warn "Para dejarla como nodo etiquetado, corre 'tailscale logout' aquí mismo y vuelve a ejecutar este instalador."
     }
 } else {
     $secret = $env:TS_OAUTH_SECRET
     if (-not $secret) { $secret = [Environment]::GetEnvironmentVariable("TS_OAUTH_SECRET", "User") }
     if (-not $secret -and (Test-Path $SecretFile)) { $secret = (Get-Content $SecretFile -Raw).Trim() }
-    if (-not $secret) {
-        # Se pide una sola vez, sin mostrarlo, y se guarda solo para este usuario.
+    if (-not $secret -and $AskSecret) {
         Write-Host "   Pega el secreto de Tailscale (tskey-client-...). No se mostrará en pantalla:"
         $sec = Read-Host "   Secreto" -AsSecureString
         $secret = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
         Remove-Variable sec
-        if (-not $secret) { Die "No se recibió el secreto." }
-        $secret = $secret.Trim()
-        [Environment]::SetEnvironmentVariable("TS_OAUTH_SECRET", $secret, "User")
-        Ok "secreto guardado para tu usuario (no se vuelve a pedir)"
+        if ($secret) {
+            $secret = $secret.Trim()
+            New-Item -ItemType Directory -Force -Path (Split-Path $SecretFile) | Out-Null
+            Set-Content -Path $SecretFile -Value $secret -NoNewline
+            Ok "secreto guardado en $SecretFile (no se vuelve a pedir)"
+        }
     }
-    # Un secreto de OAuth client necesita estos parámetros; una auth key normal no.
-    if ($secret.StartsWith("tskey-client-")) { $secret = "${secret}?ephemeral=false&preauthorized=true" }
-    & $ts up "--auth-key=$secret" "--advertise-tags=$Tags" "--hostname=$Hostname" --unattended
-    $code = $LASTEXITCODE
-    Remove-Variable secret
-    if ($code -ne 0) { Die "tailscale up falló (código $code). Si menciona 'tags', revisa que el OAuth client tenga tag:teco y tag:zotz." }
-    Ok "unida como $Hostname.$Tailnet con $Tags (desatendida)"
+    $hostArg = @()
+    if ($Hostname) { $hostArg = @("--hostname=$Hostname") }
+    if ($secret) {
+        # Red propia: unión desatendida y etiquetada.
+        if (-not $Tags) { Die "Hay secreto de Tailscale pero faltan las etiquetas: ponlas en $ProfileFile (TAGS=tag:teco) o pasa -Tags." }
+        if ($secret.StartsWith("tskey-client-")) { $secret = "${secret}?ephemeral=false&preauthorized=true" }
+        & $ts up "--auth-key=$secret" "--advertise-tags=$Tags" @hostArg --unattended
+        $code = $LASTEXITCODE
+        Remove-Variable secret
+        if ($code -ne 0) { Die "tailscale up falló (código $code). Si menciona 'tags', revisa que el OAuth client tenga esas etiquetas." }
+        Ok "unida a tu tailnet con $Tags (desatendida)"
+    } else {
+        # Cualquier otra persona: inicia sesión con SU cuenta de Tailscale.
+        Write-Host "   Inicia sesión en Tailscale con tu cuenta: abre el enlace que aparece abajo (o la ventana de Tailscale)." -ForegroundColor Yellow
+        & $ts up --unattended @hostArg
+        if ($LASTEXITCODE -ne 0) { Die "No se completó el inicio de sesión en Tailscale. Vuelve a correr el instalador." }
+        Ok "conectada a tu cuenta de Tailscale"
+    }
 }
 $self = (Get-TsStatus).Self.DNSName.TrimEnd('.')
 
@@ -187,12 +221,14 @@ if ($p.ExitCode -ne 0) { Die "teco check falló: revisa $env:APPDATA\teco\teco.t
 $cfg = Join-Path $env:APPDATA "teco\teco.toml"
 $text = Get-Content $cfg -Raw -Encoding UTF8
 $orig = $text
-# 1) Terminar desde el panel.
-$want = if ($AllowKill) { "true" } else { "false" }
-if ($text -match "(?m)^\s*allow_kill_from_panel\s*=") {
-    $text = [regex]::Replace($text, "(?m)^(\s*allow_kill_from_panel\s*=\s*)(true|false)", "`${1}$want")
-} else {
-    $text = "allow_kill_from_panel = $want`r`n" + $text
+# 1) Terminar desde el panel: solo si se pidió (parámetro o perfil); si no, se respeta.
+$kill = $AllowKill.Trim().ToLower()
+if ($kill -eq "true" -or $kill -eq "false") {
+    if ($text -match "(?m)^\s*allow_kill_from_panel\s*=") {
+        $text = [regex]::Replace($text, "(?m)^(\s*allow_kill_from_panel\s*=\s*)(true|false)", "`${1}$kill")
+    } else {
+        $text = "allow_kill_from_panel = $kill`r`n" + $text
+    }
 }
 # 2) Otras máquinas en la vista de Dispositivos (se omite esta misma y las que ya estén).
 foreach ($d in $Devices) {
@@ -206,7 +242,7 @@ if ($text -ne $orig) {
     [IO.File]::WriteAllText($cfg, $text, (New-Object Text.UTF8Encoding($false)))
     $p = Start-Process -FilePath $dest -ArgumentList "check" -Wait -PassThru -WindowStyle Hidden
     if ($p.ExitCode -ne 0) { [IO.File]::WriteAllText($cfg, $orig, (New-Object Text.UTF8Encoding($false))); Die "La configuración resultante no es válida; se dejó la anterior." }
-    Ok "actualizada: terminar desde el panel = $want, dispositivos al día ($cfg)"
+    Ok "actualizada ($cfg)"
 } else {
     Ok "ya al día ($cfg)"
 }

@@ -102,7 +102,7 @@ Este equipo siempre aparece primero. Los demás se agregan en `teco.toml` (se re
 ```toml
 [[device]]
 name = "MSI"
-url = "https://msi-zotz.tail59ed16.ts.net"   # origen del panel del nodo, sin ruta
+url = "https://msi.tu-tailnet.ts.net"   # origen del panel del nodo, sin ruta
 ```
 
 El navegador pide a cada nodo `GET /api/summary`, un JSON chico sin procesos ni eventos. Los nodos solo lo comparten con orígenes de loopback, `localhost`, `*.ts.net` o IPs de Tailscale (CORS). Un nodo que no responde se reintenta cada ~15 s.
@@ -142,13 +142,13 @@ El monitor es un proceso aparte del vigilante. El vigilante mantiene su presupue
 
 Un solo comando deja el nodo listo y es idempotente: correrlo otra vez no cambia nada.
 
-**Windows (MSI, nodo 24/7 con `tag:teco` y `tag:zotz`).** En PowerShell, sin clonar nada:
+**Windows**, en PowerShell, sin clonar nada:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/HugoRodriguezDEV/teco/HEAD/deploy/install.ps1)))
 ```
 
-**macOS** (tu Mac de trabajo, con sesión de Tailscale a tu nombre; el instalador no la cambia):
+**macOS:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/HugoRodriguezDEV/teco/HEAD/deploy/install.sh | bash
@@ -157,11 +157,26 @@ curl -fsSL https://raw.githubusercontent.com/HugoRodriguezDEV/teco/HEAD/deploy/i
 Desde el repo clonado también funciona: `.\deploy\install.ps1` o `./deploy/install.sh`.
 
 Una sola corrida deja todo listo:
-- **Secreto de Tailscale:** si la máquina no está en la tailnet, lo pide **una vez** sin mostrarlo y lo guarda solo para tu usuario.
-- **Binario:** se descarga del Release `teco-latest` y se verifica su huella SHA-256. No hace falta Rust ni iniciar sesión en GitHub. Ese Release lo publica la CI en cada push a la rama principal.
-- **`teco.toml`:** activa `allow_kill_from_panel = true` y agrega las otras máquinas a la vista de Dispositivos. El resto de tu configuración se respeta.
-- **Zotz:** en Windows, si está instalado, lo publica también en `https://msi-zotz.tail59ed16.ts.net:8443`.
-- **El secreto** nunca va en el repo y el instalador no lo imprime. También se puede dejar en la variable `TS_OAUTH_SECRET` o en `%LOCALAPPDATA%\zotz-nodes\tailscale.secret` (Windows) o `~/.config/zotz-nodes/tailscale.secret` (macOS).
+- **Tailscale con tu cuenta:** si la máquina no está en Tailscale, se abre el inicio de sesión para que entres con **tu** cuenta. Teco nunca te mete a la red de otra persona. Si Tailscale ya tiene sesión, no la toca; si la app estaba cerrada, la abre en segundo plano.
+- **Binario:** se descarga del Release `teco-latest` y se verifica su huella SHA-256. No hace falta Rust ni iniciar sesión en GitHub.
+- **`teco.toml`:** se crea con los valores por defecto si no existe; una configuración existente se respeta. Las otras máquinas de tu tailnet aparecen solas en Dispositivos.
+- **Zotz:** en Windows, si está instalado, lo publica también en el puerto 8443 de tu tailnet.
+
+### Instalación desatendida en tu propia red (opcional)
+
+Para que tus máquinas entren solas a tu tailnet, etiquetadas y sin abrir sesión, deja dos archivos **en cada máquina**. Nunca van en el repo.
+
+- `tailscale.secret`: el secreto de un OAuth client de Tailscale (*Settings → Trust credentials*), con permiso *Auth Keys: Write* y tus etiquetas.
+- `profile.env`: solo datos, el instalador no lo ejecuta:
+
+```
+TAGS=tag:teco
+HOSTNAME=msi-oficina
+ALLOW_KILL=true
+```
+
+Van en `%LOCALAPPDATA%\zotz-nodes\` (Windows) o `~/.config/zotz-nodes/` (macOS). En vez del archivo del secreto también sirve la variable `TS_OAUTH_SECRET`. Con `-AskSecret` (Windows) o `ASK_SECRET=1` (macOS), el instalador pide el secreto una vez sin mostrarlo y lo guarda. El secreto nunca se imprime.
+
 - **Política de la tailnet.** [`deploy/tailscale/policy.hujson`](deploy/tailscale/policy.hujson) es una copia de referencia con marcadores. La versión real, con correos, vive solo en la consola de Tailscale.
 
 Teco escucha en dos puertos, ambos solo en loopback:
