@@ -30,6 +30,7 @@ APPS_DIR="${APPS_DIR:-$([[ -w /Applications ]] && echo /Applications || echo "$H
 ALLOW_KILL="${ALLOW_KILL:-true}"
 DEVICES="${DEVICES:-MSI=https://msi-zotz.tail59ed16.ts.net Mac=https://macbook-pro-hugo.tail59ed16.ts.net}"
 TAILNET="tail59ed16.ts.net"
+TS_APP="${TS_APP:-/Applications/Tailscale.app}"
 
 say()  { printf '\033[1m🦉 %s\033[0m\n' "$*"; }
 skip() { printf '   ✓ %s\n' "$*"; }
@@ -41,7 +42,7 @@ die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
 say "Tailscale"
 find_ts() {
   if command -v tailscale >/dev/null 2>&1; then command -v tailscale
-  elif [[ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]]; then echo /Applications/Tailscale.app/Contents/MacOS/Tailscale
+  elif [[ -x "$TS_APP/Contents/MacOS/Tailscale" ]]; then echo "$TS_APP/Contents/MacOS/Tailscale"
   fi
 }
 TS="$(find_ts || true)"
@@ -57,12 +58,41 @@ fi
 
 state() { "$TS" status --json 2>/dev/null | grep -o '"BackendState": *"[A-Za-z]*"' | head -1 | sed 's/.*"\([A-Za-z]*\)"$/\1/'; }
 st="$(state || true)"
+if [[ "$st" != "Running" && -d "$TS_APP" ]]; then
+  # La app de Tailscale cerrada: se abre en segundo plano (sin ventana) y se espera.
+  if ! pgrep -xq Tailscale; then
+    open -gj -a "$TS_APP"
+    skip "Tailscale estaba cerrado: abierto en segundo plano"
+  fi
+  for _ in $(seq 1 30); do
+    st="$(state || true)"
+    [[ "$st" == "Running" || "$st" == "NeedsLogin" || "$st" == "Stopped" ]] && break
+    sleep 1
+  done
+  if [[ "$st" == "Stopped" ]]; then
+    # Desconectado a mano: se reconecta con la misma cuenta, sin cambiar nada más.
+    "$TS" up >/dev/null 2>&1 || true
+    for _ in $(seq 1 15); do st="$(state || true)"; [[ "$st" == "Running" ]] && break; sleep 1; done
+    [[ "$st" == "Running" ]] && skip "Tailscale reconectado"
+  fi
+fi
 if [[ "$st" == "Running" ]]; then
   # Ya hay sesión (de usuario o etiquetada): no se toca.
   skip "ya está en la tailnet; no se cambia la sesión"
 else
   secret="${TS_OAUTH_SECRET:-}"
   if [[ -z "$secret" && -f "$SECRET_FILE" ]]; then secret="$(tr -d '[:space:]' < "$SECRET_FILE")"; fi
+  if [[ -z "$secret" && -r /dev/tty ]]; then
+    # Se pide una sola vez, sin mostrarlo, y se guarda solo para este usuario.
+    printf '   Pega el secreto de Tailscale (tskey-client-...). No se mostrará: '
+    read -rs secret < /dev/tty; echo
+    secret="$(printf '%s' "$secret" | tr -d '[:space:]')"
+    if [[ -n "$secret" ]]; then
+      mkdir -p "$(dirname "$SECRET_FILE")"
+      (umask 077; printf '%s\n' "$secret" > "$SECRET_FILE")
+      skip "secreto guardado en $SECRET_FILE (no se vuelve a pedir)"
+    fi
+  fi
   [[ -n "$secret" ]] || die "La máquina no está en la tailnet y no hay secreto. Define TS_OAUTH_SECRET o guárdalo en $SECRET_FILE (chmod 600)."
   # Un secreto de OAuth client necesita estos parámetros; una auth key normal no.
   if [[ "$secret" == tskey-client-* ]]; then secret="${secret}?ephemeral=false&preauthorized=true"; fi
