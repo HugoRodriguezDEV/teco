@@ -63,6 +63,10 @@ $status = Get-TsStatus
 if ($status -and $status.BackendState -eq "Running") {
     # Ya hay sesión (de usuario o etiquetada): no se toca.
     Ok "ya está en la tailnet como $($status.Self.DNSName.TrimEnd('.')); no se cambia la sesión"
+    if (-not $status.Self.Tags) {
+        Write-Host "   ⚠ Esta máquina está a nombre de una cuenta personal, sin etiquetas: su llave caduca y no se llamará $Hostname." -ForegroundColor Yellow
+        Write-Host "     Para dejarla como nodo 24/7, corre 'tailscale logout' aquí mismo y vuelve a ejecutar este instalador." -ForegroundColor Yellow
+    }
 } else {
     $secret = $env:TS_OAUTH_SECRET
     if (-not $secret) { $secret = [Environment]::GetEnvironmentVariable("TS_OAUTH_SECRET", "User") }
@@ -93,12 +97,14 @@ if ($serve -match [regex]::Escape($ServeTarget.Replace("http://", ""))) {
 Say "Binario"
 if (-not (Test-Path $Binary) -and $App -eq "teco" -and (Test-Path ".\Cargo.toml")) {
     if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
-        Die "No encuentro $Binary ni cargo. Instala Rust (https://rustup.rs) o pasa -Binary C:\ruta\$App.exe."
+        Die "No encuentro $Binary ni cargo. Descarga 'teco-windows-latest' de la última corrida en https://github.com/HugoRodriguezDEV/teco/actions, descomprímelo y pasa -Binary C:\ruta\teco.exe."
     }
     cargo build --release
     if ($LASTEXITCODE -ne 0) { Die "cargo build falló." }
 }
-if (-not (Test-Path $Binary)) { Die "No encuentro el binario $Binary (pásalo con -Binary)." }
+if (-not (Test-Path $Binary)) {
+    Die "No encuentro el binario $Binary. Descarga 'teco-windows-latest' de la última corrida en https://github.com/HugoRodriguezDEV/teco/actions, descomprímelo y pasa -Binary C:\ruta\teco.exe."
+}
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 $dest = Join-Path $InstallDir "$App.exe"
 $changed = $false
