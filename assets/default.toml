@@ -6,6 +6,7 @@ bind_tailnet = "127.0.0.1:7778"   # destino de `tailscale serve`; "" lo desactiv
 interval_secs = 2
 allow_kill_from_panel = false
 notifications = true
+discover_tailnet = true   # la vista de Dispositivos encuentra sola las máquinas de la tailnet
 # webhook_url = "https://ntfy.sh/mi-tema"   # requiere compilar con --features webhook
 protected = ["kernel_task", "launchd", "WindowServer", "loginwindow",
              "System", "Registry", "smss.exe", "csrss.exe", "wininit.exe",

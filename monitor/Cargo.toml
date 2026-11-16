@@ -1,0 +1,20 @@
+[package]
+name = "teco-monitor"
+version = "0.1.0"
+edition = "2021"
+description = "Teco Monitor: tablero de toda la red en la barra de menú (macOS) o la bandeja (Windows)."
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "teco-monitor"
+path = "src/main.rs"
+
+[dependencies]
+tao = "0.37"
+wry = "0.57"
+tray-icon = "0.26"
+png = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false, features = ["rustls"] }

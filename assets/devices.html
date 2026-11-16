@@ -62,8 +62,8 @@ header .sum{color:var(--mute);font-size:13px;margin-left:auto;text-align:right;w
     <div class="sum" id="sum"></div>
   </header>
   <div class="grid" id="grid" aria-live="polite"></div>
-  <p class="empty" id="hint" hidden>Solo aparece este equipo. Para sumar otro nodo con Teco, agrega en <code>teco.toml</code>:<br><br>
-    <code>[[device]]</code><br><code>name = "MSI"</code><br><code>url = "https://msi-zotz.tail59ed16.ts.net"</code></p>
+  <p class="empty" id="hint" hidden>Solo aparece este equipo. Instala Teco en otra máquina de tu tailnet
+    con el comando de una línea del README y aparecerá aquí sola.</p>
 </main>
 <script>
 "use strict";
@@ -76,7 +76,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">"
 const OS = {macos: "macOS", windows: "Windows", linux: "Linux"};
 const TEXT = {ok: "Tranquilo", watch: "Atento", alert: "Alerta", off: "Sin conexión"};
 
-// Este equipo siempre va primero (url "" = mismo origen); luego los de teco.toml.
+// Este equipo siempre va primero (url "" = mismo origen); luego los de teco.toml y los
+// que Teco descubre en la tailnet (auto). Un nodo descubierto sin tag:teco solo se muestra
+// si alguna vez respondió (así no aparecen máquinas que no tienen Teco).
 const st = {devs: [{name: "", url: "", self: true}], interval: 2000, timer: 0, busy: false};
 
 function bar(pct, lim, txt, label) {
@@ -121,15 +123,18 @@ function card(d) {
   return d.el;
 }
 
+const visible = d => d.self || !d.auto || d.teco || d.seen;
+
 function render() {
   const g = $("grid");
+  const shown = st.devs.filter(visible);
   // Solo se mueve un nodo si cambió de lugar (moverlo le quita el foco).
-  st.devs.forEach((d, i) => { const el = card(d); if (g.children[i] !== el) g.insertBefore(el, g.children[i] || null); });
-  while (g.children.length > st.devs.length) g.lastChild.remove();
-  $("hint").hidden = st.devs.length > 1;
-  const on = st.devs.filter(d => d.ok);
+  shown.forEach((d, i) => { const el = card(d); if (g.children[i] !== el) g.insertBefore(el, g.children[i] || null); });
+  while (g.children.length > shown.length) g.lastChild.remove();
+  $("hint").hidden = shown.length > 1;
+  const on = shown.filter(d => d.ok);
   const bad = on.filter(d => d.data.status === "alert").length;
-  $("sum").textContent = on.length + " de " + st.devs.length + " en línea" + (bad ? " · " + bad + " en alerta" : "");
+  $("sum").textContent = on.length + " de " + shown.length + " en línea" + (bad ? " · " + bad + " en alerta" : "");
   const worst = bad ? "alert" : on.some(d => d.data.status === "watch") ? "watch" : "ok";
   document.title = (worst === "alert" ? "🔴 " : worst === "watch" ? "🟡 " : "") + "Teco · Dispositivos";
 }
@@ -137,6 +142,8 @@ function render() {
 async function fetchOne(d) {
   // Un nodo que no responde se reintenta cada ~15 s, no en cada ciclo.
   if (!d.ok && d.tried && Date.now() - d.tried < 15000) return;
+  // Tailscale ya dice que está apagado: no se intenta.
+  if (d.online === false) { d.ok = false; return; }
   d.tried = Date.now();
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 4000);
@@ -163,6 +170,9 @@ async function syncDevices() {
     for (const x of await r.json()) {
       const d = old.get(x.url) || {url: x.url};
       d.name = x.name;
+      d.auto = !!x.auto;
+      d.teco = !!x.teco;
+      d.online = x.online;
       next.push(d);
     }
     st.devs = next;

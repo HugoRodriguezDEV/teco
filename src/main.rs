@@ -9,6 +9,7 @@ mod events;
 mod monitor;
 mod notify;
 mod server;
+mod tailnet;
 mod util;
 
 use config::Config;

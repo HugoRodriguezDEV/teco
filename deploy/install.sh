@@ -23,7 +23,9 @@ TS_HOSTNAME="${TS_HOSTNAME:-macbook-pro-hugo}"
 SERVE_HTTPS_PORT="${SERVE_HTTPS_PORT:-443}"
 SERVE_TARGET="${SERVE_TARGET:-http://127.0.0.1:7778}"
 SECRET_FILE="${SECRET_FILE:-$HOME/.config/zotz-nodes/tailscale.secret}"
-RELEASE_URL="${RELEASE_URL:-https://github.com/HugoRodriguezDEV/teco/releases/download/teco-latest/teco-macos-arm64}"
+RELEASE_ZIP="${RELEASE_ZIP:-https://github.com/HugoRodriguezDEV/teco/releases/download/teco-latest/Teco-macos-arm64.zip}"
+# Teco.app (vigilante + monitor de barra de menú). /Applications si se puede escribir.
+APPS_DIR="${APPS_DIR:-$([[ -w /Applications ]] && echo /Applications || echo "$HOME/Applications")}"
 # Configuración que el instalador garantiza en teco.toml (el resto se respeta).
 ALLOW_KILL="${ALLOW_KILL:-true}"
 DEVICES="${DEVICES:-MSI=https://msi-zotz.tail59ed16.ts.net Mac=https://macbook-pro-hugo.tail59ed16.ts.net}"
@@ -79,36 +81,50 @@ fi
 
 # ---------------------------------------------------------------- binario
 say "Binario"
-TMP_BIN=""
-if [[ ! -x "$BIN" ]]; then
-  if [[ "$APP" == "teco" ]]; then
-    # Sin build local: el binario publicado en el Release, verificado con su SHA-256.
-    TMP_BIN="$(mktemp)"
-    curl -fsSL "$RELEASE_URL" -o "$TMP_BIN" || die "No pude descargar $RELEASE_URL."
-    want="$(curl -fsSL "$RELEASE_URL.sha256" | tr -d '[:space:]')" || die "No pude descargar la huella SHA-256."
-    got="$(shasum -a 256 < "$TMP_BIN" | cut -d' ' -f1)"
-    [[ "$got" == "$want" ]] || { rm -f "$TMP_BIN"; die "La huella SHA-256 no coincide; no se instala."; }
-    chmod 755 "$TMP_BIN"
-    BIN="$TMP_BIN"
-    skip "descargado del Release y verificado (SHA-256)"
-  else
-    die "No encuentro el binario $BIN (pásalo con BIN=...)."
-  fi
-fi
-mkdir -p "$INSTALL_DIR"
-DEST="$INSTALL_DIR/$APP"
 changed=0
-if [[ -f "$DEST" ]] && [[ "$(shasum -a 256 < "$BIN")" == "$(shasum -a 256 < "$DEST")" ]]; then
-  skip "sin cambios ($DEST)"
+monitor_changed=0
+BUNDLE=""
+if [[ "$APP" == "teco" && ! -x "$BIN" ]]; then
+  # Teco.app del Release: vigilante + monitor de barra de menú, verificado con SHA-256.
+  TMP_DIR="$(mktemp -d)"
+  curl -fsSL "$RELEASE_ZIP" -o "$TMP_DIR/teco.zip" || die "No pude descargar $RELEASE_ZIP."
+  want="$(curl -fsSL "$RELEASE_ZIP.sha256" | tr -d '[:space:]')" || die "No pude descargar la huella SHA-256."
+  got="$(shasum -a 256 < "$TMP_DIR/teco.zip" | cut -d' ' -f1)"
+  [[ "$got" == "$want" ]] || { rm -rf "$TMP_DIR"; die "La huella SHA-256 no coincide; no se instala."; }
+  ditto -x -k "$TMP_DIR/teco.zip" "$TMP_DIR/x"
+  skip "descargado del Release y verificado (SHA-256)"
+  mkdir -p "$APPS_DIR"
+  BUNDLE="$APPS_DIR/Teco.app"
+  NEW="$TMP_DIR/x/Teco.app"
+  same() { [[ -f "$2" ]] && [[ "$(shasum -a 256 < "$1")" == "$(shasum -a 256 < "$2")" ]]; }
+  same "$NEW/Contents/MacOS/teco" "$BUNDLE/Contents/MacOS/teco" || changed=1
+  same "$NEW/Contents/MacOS/teco-monitor" "$BUNDLE/Contents/MacOS/teco-monitor" || monitor_changed=1
+  if [[ $changed == 1 || $monitor_changed == 1 ]]; then
+    rm -rf "$BUNDLE.new" && ditto "$NEW" "$BUNDLE.new"
+    rm -rf "$BUNDLE" && mv "$BUNDLE.new" "$BUNDLE"
+    xattr -dr com.apple.quarantine "$BUNDLE" 2>/dev/null || true
+    skip "instalado en $BUNDLE"
+  else
+    skip "sin cambios ($BUNDLE)"
+  fi
+  rm -rf "$TMP_DIR"
+  DEST="$BUNDLE/Contents/MacOS/teco"
 else
-  cp "$BIN" "$DEST.new" && chmod 755 "$DEST.new" && mv -f "$DEST.new" "$DEST"
-  xattr -d com.apple.quarantine "$DEST" 2>/dev/null || true
-  changed=1
-  skip "instalado en $DEST"
+  # Binario propio (build local o BIN=...): solo el vigilante, sin monitor.
+  [[ -x "$BIN" ]] || die "No encuentro el binario $BIN (pásalo con BIN=...)."
+  mkdir -p "$INSTALL_DIR"
+  DEST="$INSTALL_DIR/$APP"
+  if [[ -f "$DEST" ]] && [[ "$(shasum -a 256 < "$BIN")" == "$(shasum -a 256 < "$DEST")" ]]; then
+    skip "sin cambios ($DEST)"
+  else
+    cp "$BIN" "$DEST.new" && chmod 755 "$DEST.new" && mv -f "$DEST.new" "$DEST"
+    xattr -d com.apple.quarantine "$DEST" 2>/dev/null || true
+    changed=1
+    skip "instalado en $DEST"
+  fi
 fi
 
 # ---------------------------------------------------------------- configuración
-[[ -n "$TMP_BIN" ]] && rm -f "$TMP_BIN"
 
 if [[ "$APP" == "teco" ]]; then
   say "Configuración"
@@ -139,44 +155,63 @@ if [[ "$APP" == "teco" ]]; then
 fi
 
 # ---------------------------------------------------------------- arranque automático
-say "Arranque automático ($LABEL)"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-mkdir -p "$HOME/Library/LaunchAgents"
-args_xml=""
-for a in $ARGS; do args_xml+="    <string>$a</string>"$'\n'; done
-want="$(cat <<EOF
+domain="gui/$(id -u)"
+# ensure_agent <label> <changed 0|1> <keepalive-xml> <extra-xml> <programa> [args...]
+ensure_agent() {
+  local label="$1" ch="$2" keep="$3" extra="$4"; shift 4
+  local plist="$HOME/Library/LaunchAgents/$label.plist" args_xml="" a want
+  for a in "$@"; do args_xml+="    <string>$a</string>"$'\n'; done
+  want="$(cat <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>$LABEL</string>
+  <key>Label</key><string>$label</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$DEST</string>
 $args_xml  </array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key>$keep
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>ProcessType</key><string>Background</string>
-  <key>LowPriorityIO</key><true/>
-  <key>Nice</key><integer>10</integer>
-  <key>StandardErrorPath</key><string>/tmp/$APP.err.log</string>
+$extra  <key>StandardErrorPath</key><string>/tmp/$label.err.log</string>
 </dict>
 </plist>
 EOF
 )"
-domain="gui/$(id -u)"
-if [[ -f "$PLIST" && "$(cat "$PLIST")" == "$want" ]] && launchctl print "$domain/$LABEL" >/dev/null 2>&1; then
-  if [[ $changed == 1 ]]; then
-    launchctl kickstart -k "$domain/$LABEL" && skip "reiniciado con el binario nuevo"
+  mkdir -p "$HOME/Library/LaunchAgents"
+  if [[ -f "$plist" && "$(cat "$plist")" == "$want" ]] && launchctl print "$domain/$label" >/dev/null 2>&1; then
+    if [[ "$ch" == 1 ]]; then
+      launchctl kickstart -k "$domain/$label" && skip "$label reiniciado con la versión nueva"
+    else
+      skip "$label ya registrado y corriendo"
+    fi
   else
-    skip "ya registrado y corriendo"
+    launchctl bootout "$domain/$label" 2>/dev/null || true
+    printf '%s\n' "$want" > "$plist"
+    launchctl bootstrap "$domain" "$plist"
+    skip "$label registrado"
   fi
-else
-  launchctl bootout "$domain/$LABEL" 2>/dev/null || true
-  printf '%s\n' "$want" > "$PLIST"
-  launchctl bootstrap "$domain" "$PLIST"
-  skip "registrado ($PLIST)"
+}
+
+say "Arranque automático"
+# Vigilante: siempre corriendo, en segundo plano.
+# shellcheck disable=SC2086  # ARGS se separa a propósito
+ensure_agent "$LABEL" "$changed" "<true/>" \
+  "  <key>ProcessType</key><string>Background</string>
+  <key>LowPriorityIO</key><true/>
+  <key>Nice</key><integer>10</integer>
+" "$DEST" $ARGS
+if [[ -n "$BUNDLE" ]]; then
+  # Monitor de barra de menú: se abre al iniciar sesión; si lo cierras con "Salir", no revive.
+  ensure_agent "$LABEL.monitor" "$monitor_changed" "<dict><key>SuccessfulExit</key><false/></dict>" \
+    "  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>ProcessType</key><string>Interactive</string>
+" "$BUNDLE/Contents/MacOS/teco-monitor"
+  # Si ya corría, esto solo trae la ventana al frente (una sola instancia).
+  ("$BUNDLE/Contents/MacOS/teco-monitor" >/dev/null 2>&1 &)
+  skip "Teco abierto en la barra de menú"
+  # Instalación vieja fuera de la app: se retira para no tener dos copias.
+  rm -f "$HOME/Library/Application Support/teco/bin/teco" 2>/dev/null || true
 fi
 
 say "Listo: https://$("$TS" status --json 2>/dev/null | grep -o '"DNSName": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)\."$/\1/')$( [[ "$SERVE_HTTPS_PORT" == 443 ]] || echo ":$SERVE_HTTPS_PORT")"

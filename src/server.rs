@@ -10,6 +10,8 @@ use std::net::{IpAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+static DISCOVERY: Mutex<crate::tailnet::Discovery> = Mutex::new(crate::tailnet::Discovery::new());
+
 const INDEX_HTML: &str = include_str!("../assets/index.html");
 const DEVICES_HTML: &str = include_str!("../assets/devices.html");
 const LOGO_SVG: &str = include_str!("../assets/teco.svg");
@@ -135,7 +137,11 @@ fn route(
     match (method, req.path) {
         ("GET", "/") => {
             // La vista de dispositivos pide /api/summary a cada nodo: se permiten esos orígenes.
-            let connect: String = lock(mon).cfg.devices.iter().map(|d| format!(" {}", d.url)).collect();
+            let mut connect: String = lock(mon).cfg.devices.iter().map(|d| format!(" {}", d.url)).collect();
+            if lock(mon).cfg.discover_tailnet {
+                // Nodos descubiertos en la tailnet (y los que aparezcan después sin recargar).
+                connect.push_str(" https://*.ts.net");
+            }
             let extra = format!("Content-Security-Policy: {}\r\n", csp(&connect));
             respond_with(s, head_only, 200, "text/html; charset=utf-8", DEVICES_HTML.as_bytes(), false, &extra)
         }
@@ -143,17 +149,41 @@ fn route(
             respond(s, head_only, 200, "text/html; charset=utf-8", INDEX_HTML.as_bytes(), false)
         }
         ("GET", "/api/devices") => {
+            let (manual, discover) = {
+                let m = lock(mon);
+                (m.cfg.devices.clone(), m.cfg.discover_tailnet)
+            };
             json.clear();
             json.push('[');
-            for (i, d) in lock(mon).cfg.devices.iter().enumerate() {
-                if i > 0 {
+            let mut first = true;
+            let mut item = |json: &mut String, name: &str, url: &str, extra: &str| {
+                if !first {
                     json.push(',');
                 }
+                first = false;
                 json.push_str("{\"name\":");
-                json_str(json, &d.name);
+                json_str(json, name);
                 json.push_str(",\"url\":");
-                json_str(json, &d.url);
+                json_str(json, url);
+                json.push_str(extra);
                 json.push('}');
+            };
+            for d in &manual {
+                item(json, &d.name, &d.url, "");
+            }
+            if discover {
+                // Fuera del candado del monitor: `tailscale status` tarda unos ms.
+                let mut disc = DISCOVERY.lock().unwrap_or_else(|e| e.into_inner());
+                for p in disc.peers() {
+                    if manual.iter().any(|d| d.url == p.url) {
+                        continue;
+                    }
+                    let extra = format!(
+                        ",\"auto\":true,\"teco\":{},\"online\":{}",
+                        p.teco, p.online
+                    );
+                    item(json, &p.name, &p.url, &extra);
+                }
             }
             json.push(']');
             respond(s, head_only, 200, "application/json", json.as_bytes(), false)

@@ -126,6 +126,18 @@ El botón **Terminar** solo aparece con `allow_kill_from_panel = true`. Tiene es
 - exige la cabecera `X-Teco` y un `Origin` igual al `Host`, contra CSRF;
 - valida `Host` contra DNS rebinding. Acepta loopback, IPs literales y `*.ts.net`, así que funciona por Tailscale con `tailscale serve` (ver abajo).
 
+## Teco Monitor (barra de menú)
+
+En la Mac, el instalador agrega **`Teco.app`** a Aplicaciones. Es un espacio que siempre está monitoreando toda tu red:
+
+- **Un tecolote en la barra de menú** que cambia de color según el peor estado de todas tus máquinas. En macOS es monocromo cuando todo está tranquilo; se pone amarillo con algo atento, rojo con una alerta o una máquina caída, y gris con un punto rojo si no hay Tailscale.
+- **Abrir tablero:** abre la vista de Dispositivos en su propia ventana. Al cerrarla se libera la memoria del motor web y el tecolote sigue vigilando.
+- **Sin ícono en el Dock.** Se abre solo al iniciar sesión. Si lo cierras con "Salir", no vuelve hasta el siguiente inicio de sesión.
+- **Tailscale siempre arriba:** si la app de Tailscale se cierra, el monitor la vuelve a abrir en segundo plano.
+- **Las máquinas aparecen solas:** Teco descubre los nodos de tu tailnet (`discover_tailnet = true`). Basta con instalar Teco en una máquina nueva.
+
+El monitor es un proceso aparte del vigilante. El vigilante mantiene su presupuesto; el monitor usa unos 30–60 MB solo mientras la ventana está abierta.
+
 ## Instalación como nodo (Tailscale + arranque automático)
 
 Un solo comando deja el nodo listo y es idempotente: correrlo otra vez no cambia nada.

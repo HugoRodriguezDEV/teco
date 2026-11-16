@@ -14,6 +14,14 @@ pub fn native(title: &str, body: &str) {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn show(title: &str, body: &str) {
+    // macOS: si Teco.app está instalada, las notificaciones salen a nombre de "Teco".
+    #[cfg(target_os = "macos")]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = notify_rust::set_application("dev.hugorodriguez.teco");
+        });
+    }
     let r = notify_rust::Notification::new().summary(title).body(body).show();
     if let Err(e) = r {
         eprintln!("teco: notificación falló: {e}");

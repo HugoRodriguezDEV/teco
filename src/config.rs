@@ -32,6 +32,9 @@ pub struct Config {
     pub system: SystemLimits,
     #[serde(default, rename = "rule")]
     pub rules: Vec<Rule>,
+    /// Descubrir los otros nodos de la tailnet para la vista de dispositivos.
+    #[serde(default = "d_true")]
+    pub discover_tailnet: bool,
     /// Otros nodos con Teco que aparecen en la vista de dispositivos.
     #[serde(default, rename = "device")]
     pub devices: Vec<Device>,
