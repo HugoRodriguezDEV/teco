@@ -16,8 +16,8 @@
 ## 3. Instalador de Windows
 
 - [ ] 3.1 Crear `deploy/install.ps1` con los mismos parámetros; verificar con `Invoke-ScriptAnalyzer` sin errores
-- [ ] 3.2 Instalar Tailscale con `winget` si falta y fallar con instrucciones si no hay `winget`; verificar corriendo dos veces sin reinstalar
-- [ ] 3.3 Unir el nodo etiquetado con `--unattended` y nombre fijo usando el secreto local; verificar en la consola de Tailscale que la MSI aparece con `tag:teco` y `tag:zotz`
+- [x] 3.2 Instalar Tailscale con `winget` si falta y fallar con instrucciones si no hay `winget`; verificar corriendo dos veces sin reinstalar
+- [x] 3.3 Unir el nodo etiquetado con `--unattended` y nombre fijo usando el secreto local; verificar en la consola de Tailscale que la MSI aparece con `tag:teco` y `tag:zotz`
 - [ ] 3.4 Configurar `tailscale serve`, instalar el binario en `%LOCALAPPDATA%\teco`, crear `teco.toml` solo si no existe y registrar la tarea programada con reinicio; verificar abriendo el panel desde la Mac y matando `teco.exe` para ver que reinicia
 - [ ] 3.5 Reemplazar `packaging/windows/install-task.ps1` por el nuevo instalador y actualizar `README.md`; verificar que los pasos del README funcionan en la MSI
 

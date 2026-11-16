@@ -49,4 +49,4 @@ Teco ya escucha por defecto en `127.0.0.1:7777` y su protección de `Host` ya ac
 
 ## Open Questions
 
-- Nombre definitivo de la tailnet y hostnames (`msi-zotz`, `mac-hugo` propuestos): no cambian el diseño.
+- Nombre definitivo de la tailnet y hostnames (`msi-zotz`, `macbook-pro-hugo` propuestos): no cambian el diseño.
