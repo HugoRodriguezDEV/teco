@@ -6,6 +6,7 @@
 <title>Teco · Dispositivos</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
+[hidden]{display:none!important}
 :root{
   --bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mute:#5d6672;--line:#e3e6ea;--bar:#e9ecef;
   --ok:#1f8a4c;--ok-bg:#e5f5ec;--warn:#a86b00;--warn-bg:#fff4d9;--bad:#c62828;--bad-bg:#fde8e8;
@@ -137,9 +138,18 @@ function card(d) {
     + bar(s.cpu, s.lim_cpu, x ? s.cpu.toFixed(0) + " %" : "—", "CPU")
     + bar(memPct, s.lim_mem, x ? fmtB(s.mem_used) + " / " + fmtB(s.mem_total) : "—", "RAM")
     + bar(swapPct, swapLim, x ? (s.swap_total ? fmtB(s.swap_used) + " / " + fmtB(s.swap_total) : "sin swap") : "—", "Swap")
+    + gpuBars(s.gpu)
     + '</div>' + hotList(d)
     + '<div class="foot"><span>' + esc(foot) + '</span><a class="go" href="' + esc(link(d)) + '">Ver procesos →</a></div>';
   return d.el;
+}
+
+// GPU y VRAM: solo si esa máquina tiene tarjeta gráfica (si no, no se muestra nada).
+function gpuBars(g) {
+  if (!g) return "";
+  let h = bar(g.usage, g.lim_gpu, g.usage.toFixed(0) + " %", '<span title="' + esc(g.cards.map(c => c.name).join(" + ")) + '">GPU</span>');
+  if (g.vram_total) h += bar(g.vram_used * 100 / g.vram_total, g.lim_vram, fmtB(g.vram_used) + " / " + fmtB(g.vram_total), "VRAM");
+  return h;
 }
 
 // Procesos que se pasan (o están por pasarse) de un límite, con su botonera.

@@ -6,6 +6,7 @@
 <title>Teco</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
+[hidden]{display:none!important}
 :root{
   --bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mute:#5d6672;--line:#e3e6ea;--bar:#e9ecef;
   --ok:#1f8a4c;--ok-bg:#e5f5ec;--warn:#a86b00;--warn-bg:#fff4d9;--bad:#c62828;--bad-bg:#fde8e8;
@@ -118,6 +119,9 @@ footer{color:var(--mute);font-size:12px;text-align:center;padding:8px 0 20px}
       <div class="bar"><span>CPU</span><div class="track"><div class="fill" id="cpuFill"></div><div class="lim" id="cpuLim"></div></div><span id="cpuTxt"></span></div>
       <div class="bar"><span>RAM</span><div class="track"><div class="fill" id="memFill"></div><div class="lim" id="memLim"></div></div><span id="memTxt"></span></div>
       <div class="bar"><span>Swap</span><div class="track"><div class="fill" id="swapFill"></div><div class="lim" id="swapLim"></div></div><span id="swapTxt"></span></div>
+      <!-- Solo si la máquina tiene tarjeta gráfica. -->
+      <div class="bar" id="gpuRow" hidden><span>GPU</span><div class="track"><div class="fill" id="gpuFill"></div><div class="lim" id="gpuLim"></div></div><span id="gpuTxt"></span></div>
+      <div class="bar" id="vramRow" hidden><span>VRAM</span><div class="track"><div class="fill" id="vramFill"></div><div class="lim" id="vramLim"></div></div><span id="vramTxt"></span></div>
     </div>
   </section>
 
@@ -130,13 +134,13 @@ footer{color:var(--mute);font-size:12px;text-align:center;padding:8px 0 20px}
     <div class="tools">
       <h2>Procesos más pesados <span class="n" id="procN">0</span></h2>
       <div class="seg" role="group" aria-label="Ordenar por">
-        <button id="byMem" aria-pressed="true">RAM</button><button id="byCpu" aria-pressed="false">CPU</button>
+        <button id="byMem" aria-pressed="true">RAM</button><button id="byCpu" aria-pressed="false">CPU</button><button id="byGpu" aria-pressed="false" hidden>GPU</button>
       </div>
       <input type="search" id="q" placeholder="Filtrar (nombre, app, comando o PID)" aria-label="Filtrar procesos">
     </div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>Proceso</th><th>App</th><th class="num">PID</th><th class="num">CPU</th><th class="num">RAM</th><th class="num">Vivo</th><th class="cmd">Comando</th><th id="killTh"></th></tr></thead>
+        <thead><tr><th>Proceso</th><th>App</th><th class="num">PID</th><th class="num">CPU</th><th class="num">RAM</th><th class="num gpu" hidden>GPU</th><th class="num">Vivo</th><th class="cmd">Comando</th><th id="killTh"></th></tr></thead>
         <tbody id="procs"></tbody>
       </table>
     </div>
@@ -202,6 +206,18 @@ function render(d) {
   const swapPct = s.swap_total ? s.swap_used * 100 / s.swap_total : 0;
   const swapLimPct = s.swap_total && s.lim_swap_gb ? s.lim_swap_gb * GB * 100 / s.swap_total : 0;
   bar("swap", swapPct, swapLimPct, s.swap_total ? fmtB(s.swap_used) + " / " + fmtB(s.swap_total) : "sin swap");
+  // GPU: solo si la máquina tiene tarjeta (si no, el JSON no trae "gpu" y no se muestra nada).
+  const g = s.gpu;
+  $("gpuRow").hidden = !g;
+  $("vramRow").hidden = !(g && g.vram_total);
+  $("byGpu").hidden = !g;
+  document.querySelectorAll("th.gpu").forEach(th => th.hidden = !g);
+  if (g) {
+    const names = g.cards.map(c => c.name).join(" + ");
+    bar("gpu", g.usage, g.lim_gpu, g.usage.toFixed(0) + " %");
+    $("gpuRow").title = names;
+    if (g.vram_total) bar("vram", g.vram_used * 100 / g.vram_total, g.lim_vram, fmtB(g.vram_used) + " / " + fmtB(g.vram_total));
+  } else if (st.sort === "gpu") { setSort("mem"); }
 
   // Alertas
   $("alertN").textContent = fired.length;
@@ -232,9 +248,10 @@ function render(d) {
       : '<td class="app">' + esc(p.app) + '</td>';
     return '<tr class="' + cls + '"><td>' + esc(p.name) + '</td>' + app + '<td class="num">' + p.pid + '</td>'
       + '<td class="num">' + p.cpu.toFixed(1) + ' %</td><td class="num">' + fmtB(p.mem) + '</td>'
+      + (s.gpu ? '<td class="num" title="Memoria de GPU: ' + fmtB(p.vram || 0) + '">' + (p.gpu || 0).toFixed(1) + ' %</td>' : '')
       + '<td class="num">' + fmtDur(p.runtime) + '</td><td class="cmd" title="' + esc(p.cmd) + '">' + esc(p.cmd) + '</td>'
       + '<td>' + kill + '</td></tr>';
-  }).join("") || '<tr><td colspan="8" class="empty">Nada coincide.</td></tr>';
+  }).join("") || '<tr><td colspan="9" class="empty">Nada coincide.</td></tr>';
 
   // Historial
   $("events").innerHTML = d.events.length ? d.events.map(e =>
@@ -271,10 +288,12 @@ function setSort(s) {
   try { localStorage.setItem("teco.sort", s); } catch (e) {}
   $("byMem").setAttribute("aria-pressed", s === "mem");
   $("byCpu").setAttribute("aria-pressed", s === "cpu");
+  $("byGpu").setAttribute("aria-pressed", s === "gpu");
   poll();
 }
 $("byMem").onclick = () => setSort("mem");
 $("byCpu").onclick = () => setSort("cpu");
+$("byGpu").onclick = () => setSort("gpu");
 let qt = 0;
 $("q").addEventListener("input", e => { clearTimeout(qt); qt = setTimeout(() => { st.q = e.target.value; poll(); }, 200); });
 

@@ -96,10 +96,10 @@ fn check(path: &Path) {
     println!("✓ {}", path.display());
     println!("  panel: http://{}  · cada {} s · terminar desde el panel: {}", c.bind, c.interval_secs, if c.allow_kill_from_panel { "sí" } else { "no" });
     let s = &c.system;
-    let sys = limits(&[("RAM", s.max_mem_percent, "%"), ("swap", s.max_swap_gb, "GB"), ("CPU", s.max_cpu_percent, "%")]);
+    let sys = limits(&[("RAM", s.max_mem_percent, "%"), ("swap", s.max_swap_gb, "GB"), ("CPU", s.max_cpu_percent, "%"), ("GPU", s.max_gpu_percent, "%"), ("VRAM", s.max_vram_percent, "%")]);
     println!("  sistema: {sys} · sostenido {} s", s.for_secs);
     for r in &c.rules {
-        let lims = limits(&[("mem", r.max_mem_gb, "GB"), ("cpu", r.max_cpu_percent, "%"), ("vivo", r.max_runtime_min, "min")]);
+        let lims = limits(&[("mem", r.max_mem_gb, "GB"), ("cpu", r.max_cpu_percent, "%"), ("vivo", r.max_runtime_min, "min"), ("gpu", r.max_gpu_percent, "%"), ("vram", r.max_vram_gb, "GB")]);
         let action = match r.action {
             config::Action::Alert => "avisar",
             config::Action::Kill => "terminar",
@@ -132,7 +132,8 @@ fn run(path: &Path, t0: Instant) {
     let cfg = load(path);
     let log_path = path.parent().map(|d| d.join("teco-events.log"));
     let bind = cfg.bind.clone();
-    let mut mon = Monitor::new(cfg, EventLog::new(log_path));
+    let mut gpu = monitor::GpuProbe::detect();
+    let mut mon = Monitor::new(cfg, EventLog::new(log_path), gpu.is_some());
     let listener = match server::bind(&bind) {
         Ok(l) => l,
         Err(e) => {
@@ -155,6 +156,9 @@ fn run(path: &Path, t0: Instant) {
             }
         }
     };
+    if let Some(g) = gpu.as_mut() {
+        mon.set_gpu(g.read());
+    }
     mon.tick();
     mon.events.push(
         Kind::Info,
@@ -179,11 +183,12 @@ fn run(path: &Path, t0: Instant) {
         }
     }
     eprintln!("teco 🦉 vigilando · http://{bind} · {}", path.display());
-    sample_loop(&mon, path, None);
+    sample_loop(&mon, path, None, &mut gpu);
 }
 
 /// Bucle de muestreo. Con `until`, termina en ese instante (bench).
-fn sample_loop(mon: &Mutex<Monitor>, path: &Path, until: Option<Instant>) {
+/// `gpu` se lee aquí, fuera del candado: solo este hilo toca la tarjeta.
+fn sample_loop(mon: &Mutex<Monitor>, path: &Path, until: Option<Instant>, gpu: &mut Option<monitor::GpuProbe>) {
     let mut cfg_mtime = config::mtime(path);
     let mut next = Instant::now();
     loop {
@@ -207,7 +212,12 @@ fn sample_loop(mon: &Mutex<Monitor>, path: &Path, until: Option<Instant>) {
             cfg_mtime = mt;
             reload(mon, path);
         }
-        lock(mon).tick();
+        let snap = gpu.as_mut().map(|g| g.read());
+        let mut m = lock(mon);
+        if let Some(s) = snap {
+            m.set_gpu(s);
+        }
+        m.tick();
     }
 }
 
@@ -235,7 +245,8 @@ fn lock(m: &Mutex<Monitor>) -> std::sync::MutexGuard<'_, Monitor> {
 fn bench(path: &Path, secs: u64, t0: Instant) {
     let cfg = load(path);
     let interval = cfg.interval_secs;
-    let mut mon = Monitor::new(cfg, EventLog::new(None));
+    let mut gpu = monitor::GpuProbe::detect();
+    let mut mon = Monitor::new(cfg, EventLog::new(None), gpu.is_some());
     mon.dry_run = true;
     mon.tick();
     let startup = t0.elapsed();
@@ -253,7 +264,7 @@ fn bench(path: &Path, secs: u64, t0: Instant) {
     let mut last_print = Instant::now();
     while Instant::now() < end {
         let step_end = (Instant::now() + Duration::from_secs(10)).min(end);
-        sample_loop(&mon, path, Some(step_end));
+        sample_loop(&mon, path, Some(step_end), &mut gpu);
         let rss = own_rss();
         peak = peak.max(rss);
         if last_print.elapsed() >= Duration::from_secs(10) || Instant::now() >= end {

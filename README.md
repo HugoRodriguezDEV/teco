@@ -126,6 +126,16 @@ El botón **Terminar** solo aparece con `allow_kill_from_panel = true`. Tiene es
 - exige la cabecera `X-Teco` y un `Origin` igual al `Host`, contra CSRF;
 - valida `Host` contra DNS rebinding. Acepta loopback, IPs literales y `*.ts.net`, así que funciona por Tailscale con `tailscale serve` (ver abajo).
 
+## Tarjeta gráfica (GPU)
+
+Si la máquina tiene tarjeta gráfica, Teco también la vigila; **si no tiene, no aparece nada de GPU**. Los adaptadores de software y de máquinas virtuales no cuentan como tarjeta.
+
+- **Panel y tablero:** muestran barras **GPU** (uso de la tarjeta más cargada) y **VRAM** (memoria de video usada contra la total), una columna **GPU** por proceso y un botón para ordenar por GPU. El uso de GPU de cada proceso solo lo da Windows.
+- **Reglas:**
+  - en `[system]`: `max_gpu_percent` y `max_vram_percent` (por defecto `max_vram_percent = 95`);
+  - por regla: `max_gpu_percent` y `max_vram_gb`.
+  - Funcionan igual que las de CPU y RAM, incluida la botonera para detener o matar.
+
 ## Teco Monitor (barra de menú)
 
 En la Mac, el instalador agrega **`Teco.app`** a Aplicaciones. Es un espacio que siempre está monitoreando toda tu red:

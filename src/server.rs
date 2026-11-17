@@ -201,7 +201,11 @@ fn route(
             respond(s, head_only, 200, "image/svg+xml", LOGO_SVG.as_bytes(), true)
         }
         ("GET", "/api/state") => {
-            let sort = if param(req.query, "sort") == Some("cpu") { SortBy::Cpu } else { SortBy::Mem };
+            let sort = match param(req.query, "sort") {
+                Some("cpu") => SortBy::Cpu,
+                Some("gpu") => SortBy::Gpu,
+                _ => SortBy::Mem,
+            };
             let filter = param(req.query, "q").map(url_decode).unwrap_or_default();
             let n = param(req.query, "n").and_then(|v| v.parse().ok()).unwrap_or(25usize).clamp(1, 200);
             {

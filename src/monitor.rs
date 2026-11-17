@@ -26,6 +26,10 @@ const KILL_GRACE: Duration = Duration::from_secs(5);
 const SYS_MEM: u16 = u16::MAX;
 const SYS_SWAP: u16 = u16::MAX - 1;
 const SYS_CPU: u16 = u16::MAX - 2;
+const SYS_GPU: u16 = u16::MAX - 3;
+const SYS_VRAM: u16 = u16::MAX - 4;
+/// Toda clave de sistema es >= SYS_MIN.
+const SYS_MIN: u16 = SYS_VRAM;
 
 struct Meta {
     start: u64,
@@ -48,6 +52,10 @@ pub struct Row {
     pub cpu: f32,
     pub mem: u64,
     pub runtime: u64,
+    /// Uso de GPU (%) y memoria de GPU del proceso; `None` si la máquina no tiene tarjeta
+    /// o el sistema no lo reporta (solo Windows da el dato por proceso).
+    pub gpu: Option<f32>,
+    pub vram: Option<u64>,
     pub name: Arc<str>,
     pub cmd: Arc<str>,
     mask: u64,
@@ -63,6 +71,10 @@ pub enum Metric {
     SysMem,
     SysSwap,
     SysCpu,
+    Gpu,
+    Vram,
+    SysGpu,
+    SysVram,
 }
 
 impl Metric {
@@ -74,20 +86,28 @@ impl Metric {
             Metric::SysMem => "sys_mem",
             Metric::SysSwap => "sys_swap",
             Metric::SysCpu => "sys_cpu",
+            Metric::Gpu => "gpu",
+            Metric::Vram => "vram",
+            Metric::SysGpu => "sys_gpu",
+            Metric::SysVram => "sys_vram",
         }
     }
     /// Texto humano de un valor en las unidades de la métrica.
     fn fmt(self, v: f64) -> String {
         match self {
-            Metric::Mem | Metric::SysSwap => format!("{v:.1} GB"),
-            Metric::Cpu | Metric::SysCpu | Metric::SysMem => format!("{v:.0} %"),
+            Metric::Mem | Metric::SysSwap | Metric::Vram => format!("{v:.1} GB"),
+            Metric::Cpu | Metric::SysCpu | Metric::SysMem | Metric::Gpu | Metric::SysGpu | Metric::SysVram => {
+                format!("{v:.0} %")
+            }
             Metric::Runtime => fmt_dur((v * 60.0) as u64),
         }
     }
     fn fmt_limit(self, v: f64) -> String {
         match self {
-            Metric::Mem | Metric::SysSwap => format!("{} GB", trim_num(v)),
-            Metric::Cpu | Metric::SysCpu | Metric::SysMem => format!("{} %", trim_num(v)),
+            Metric::Mem | Metric::SysSwap | Metric::Vram => format!("{} GB", trim_num(v)),
+            Metric::Cpu | Metric::SysCpu | Metric::SysMem | Metric::Gpu | Metric::SysGpu | Metric::SysVram => {
+                format!("{} %", trim_num(v))
+            }
             Metric::Runtime => format!("{} min", trim_num(v)),
         }
     }
@@ -164,6 +184,7 @@ impl Status {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SortBy {
+    Gpu,
     Mem,
     Cpu,
 }
@@ -177,7 +198,12 @@ pub struct Monitor {
     cache: HashMap<u32, Meta>,
     pub rows: Vec<Row>,
     idx: HashMap<u32, u32>,
-    agg: HashMap<u32, (u64, f32, u32)>,
+    /// Por raíz de árbol: (mem, cpu, miembros, gpu, vram).
+    agg: HashMap<u32, (u64, f32, u32, f32, u64)>,
+    /// ¿Tiene la máquina tarjeta gráfica real? Si no, no se muestra nada de GPU.
+    has_gpu: bool,
+    /// Última lectura de la tarjeta (la hace `GpuProbe` en el hilo del muestreo).
+    gpu: Option<GpuSnapshot>,
     root_of: Vec<u32>,
     tracks: HashMap<Key, Track>,
     pending_kills: Vec<(u32, u64, Instant)>,
@@ -198,11 +224,13 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    pub fn new(cfg: Config, events: EventLog) -> Monitor {
+    pub fn new(cfg: Config, events: EventLog, has_gpu: bool) -> Monitor {
         let refresh = ProcessRefreshKind::nothing()
             .with_cpu()
             .with_memory()
             .with_cmd(UpdateKind::OnlyIfNotSet);
+        // Uso de GPU por proceso: solo si hay tarjeta (en Windows cuesta un contador por proceso).
+        let refresh = if has_gpu { refresh.with_gpu_usage().with_gpu_memory() } else { refresh };
         let sys = System::new().unwrap_or_else(|e| {
             eprintln!("teco: sysinfo no disponible: {e}");
             std::process::exit(1);
@@ -217,6 +245,8 @@ impl Monitor {
             rows: Vec::with_capacity(1024),
             idx: HashMap::with_capacity(1024),
             agg: HashMap::new(),
+            has_gpu,
+            gpu: None,
             root_of: Vec::with_capacity(1024),
             tracks: HashMap::new(),
             pending_kills: Vec::new(),
@@ -247,7 +277,7 @@ impl Monitor {
         self.cfg_gen = self.cfg_gen.wrapping_add(1).max(1);
         self.rebuild_needles();
         // Las reglas pudieron cambiar de orden/forma: se reinicia el seguimiento de procesos.
-        self.tracks.retain(|k, _| k.rule >= SYS_CPU);
+        self.tracks.retain(|k, _| k.rule >= SYS_MIN);
     }
 
     /// Una muestra completa: refrescar, evaluar reglas, actuar.
@@ -271,6 +301,7 @@ impl Monitor {
         self.mem_total = self.sys.total_memory();
         self.swap_used = self.sys.used_swap();
         self.swap_total = self.sys.total_swap();
+        let has_gpu = self.has_gpu;
 
         self.rows.clear();
         self.idx.clear();
@@ -299,6 +330,8 @@ impl Monitor {
                 cpu: p.cpu_usage(),
                 mem: p.memory(),
                 runtime: p.run_time(),
+                gpu: if has_gpu { p.gpu_usage() } else { None },
+                vram: if has_gpu { p.gpu_memory() } else { None },
                 name: meta.name.clone(),
                 cmd: meta.cmd.clone(),
                 mask: meta.mask,
@@ -316,7 +349,7 @@ impl Monitor {
         // --- Sistema ---
         let s = &self.cfg.system;
         let (sfor, scool) = (s.for_secs, s.cooldown_min);
-        let mut sys_cands: [Option<Cand>; 3] = [None, None, None];
+        let mut sys_cands: [Option<Cand>; 5] = [None, None, None, None, None];
         if let Some(l) = s.max_mem_percent {
             let v = if self.mem_total > 0 { self.mem_used as f64 * 100.0 / self.mem_total as f64 } else { 0.0 };
             sys_cands[0] = Some(sys_cand(SYS_MEM, "RAM del equipo", Metric::SysMem, v, l, self.mem_used));
@@ -327,6 +360,15 @@ impl Monitor {
         }
         if let Some(l) = s.max_cpu_percent {
             sys_cands[2] = Some(sys_cand(SYS_CPU, "CPU global", Metric::SysCpu, self.cpu_global as f64, l, 0));
+        }
+        if let Some(g) = &self.gpu {
+            if let Some(l) = s.max_gpu_percent {
+                sys_cands[3] = Some(sys_cand(SYS_GPU, "GPU", Metric::SysGpu, g.usage as f64, l, 0));
+            }
+            if let (Some(l), true) = (s.max_vram_percent, g.vram_total > 0) {
+                let v = g.vram_used as f64 * 100.0 / g.vram_total as f64;
+                sys_cands[4] = Some(sys_cand(SYS_VRAM, "Memoria de video", Metric::SysVram, v, l, g.vram_used));
+            }
         }
         for c in sys_cands.into_iter().flatten() {
             let (key, name) = (c.key, c.name.clone());
@@ -346,7 +388,8 @@ impl Monitor {
                     if row.mask & bit == 0 {
                         continue;
                     }
-                    let Some(c) = cand(rule, ri, row.pid, row.start, &row.name, row.mem, row.cpu, row.runtime, 1)
+                    let use_ = (row.mem, row.cpu, row.gpu.unwrap_or(0.0), row.vram.unwrap_or(0), row.runtime);
+                    let Some(c) = cand(rule, ri, row.pid, row.start, &row.name, use_, 1)
                     else {
                         continue;
                     };
@@ -385,16 +428,18 @@ impl Monitor {
                 }
                 self.root_of.push(root);
                 if root != u32::MAX {
-                    let e = self.agg.entry(root).or_insert((0, 0.0, 0));
+                    let e = self.agg.entry(root).or_insert((0, 0.0, 0, 0.0, 0));
                     e.0 += self.rows[i].mem;
                     e.1 += self.rows[i].cpu;
                     e.2 += 1;
+                    e.3 += self.rows[i].gpu.unwrap_or(0.0);
+                    e.4 += self.rows[i].vram.unwrap_or(0);
                 }
             }
-            for (&root, &(mem, cpu, members)) in self.agg.iter() {
+            for (&root, &(mem, cpu, members, gpu, vram)) in self.agg.iter() {
                 let r = &self.rows[root as usize];
                 let root_pid = r.pid;
-                let Some(c) = cand(rule, ri, r.pid, r.start, &r.name, mem, cpu, r.runtime, members) else {
+                let Some(c) = cand(rule, ri, r.pid, r.start, &r.name, (mem, cpu, gpu, vram, r.runtime), members) else {
                     continue;
                 };
                 let ratio = c.ratio as f32;
@@ -463,7 +508,7 @@ impl Monitor {
     fn fire(&mut self, key: Key, refire: bool, pids: &[u32], now: Instant) {
         let Some(t) = self.tracks.get(&key) else { return };
         let since = t.over_since.map(|s| now.duration_since(s).as_secs()).unwrap_or(0);
-        let is_sys = key.rule >= SYS_CPU;
+        let is_sys = key.rule >= SYS_MIN;
         let title = format!("🦉 Teco · {}", t.rule_name);
         let mut body = if is_sys {
             format!("{} (límite {})", t.metric.fmt(t.value), t.metric.fmt_limit(t.limit))
@@ -697,7 +742,7 @@ impl Monitor {
         out.push_str(",\"os\":");
         json_str(out, std::env::consts::OS);
         // Procesos que se están pasando (o están cerca) de una regla: para la botonera.
-        let mut list: Vec<(&Key, &Track)> = self.tracks.iter().filter(|(k, _)| k.rule < SYS_CPU).collect();
+        let mut list: Vec<(&Key, &Track)> = self.tracks.iter().filter(|(k, _)| k.rule < SYS_MIN).collect();
         list.sort_by(|a, b| {
             b.1.fired.cmp(&a.1.fired).then(b.1.ratio.partial_cmp(&a.1.ratio).unwrap_or(std::cmp::Ordering::Equal))
         });
@@ -792,6 +837,35 @@ impl Monitor {
         json_num(out, s.max_mem_percent.unwrap_or(0.0));
         out.push_str(",\"lim_swap_gb\":");
         json_num(out, s.max_swap_gb.unwrap_or(0.0));
+        // Solo si hay tarjeta gráfica: sin ella, el panel no muestra nada de GPU.
+        if let Some(g) = self.gpu.as_ref().filter(|_| self.has_gpu) {
+            out.push_str(",\"gpu\":{\"usage\":");
+            json_num(out, g.usage as f64);
+            out.push_str(",\"vram_used\":");
+            json_num(out, g.vram_used as f64);
+            out.push_str(",\"vram_total\":");
+            json_num(out, g.vram_total as f64);
+            out.push_str(",\"lim_gpu\":");
+            json_num(out, s.max_gpu_percent.unwrap_or(0.0));
+            out.push_str(",\"lim_vram\":");
+            json_num(out, s.max_vram_percent.unwrap_or(0.0));
+            out.push_str(",\"cards\":[");
+            for (i, c) in g.cards.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str("{\"name\":");
+                json_str(out, &c.name);
+                out.push_str(",\"usage\":");
+                json_num(out, c.usage as f64);
+                out.push_str(",\"used\":");
+                json_num(out, c.used as f64);
+                out.push_str(",\"total\":");
+                json_num(out, c.total as f64);
+                out.push('}');
+            }
+            out.push_str("]}");
+        }
         out.push('}');
     }
 
@@ -820,7 +894,7 @@ impl Monitor {
             out.push_str(",\"rule\":");
             json_str(out, &t.rule_name);
             out.push_str(",\"sys\":");
-            out.push_str(if k.rule >= SYS_CPU { "true" } else { "false" });
+            out.push_str(if k.rule >= SYS_MIN { "true" } else { "false" });
             out.push_str(",\"pid\":");
             json_num(out, k.pid as f64);
             out.push_str(",\"start\":");
@@ -869,6 +943,7 @@ impl Monitor {
             match sort {
                 SortBy::Mem => (r.mem as f64, r.cpu as f64),
                 SortBy::Cpu => (r.cpu as f64, r.mem as f64),
+                SortBy::Gpu => (r.gpu.unwrap_or(0.0) as f64, r.vram.unwrap_or(0) as f64),
             }
         };
         let cmp = |a: &u32, b: &u32| key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal);
@@ -910,6 +985,12 @@ impl Monitor {
             json_num(out, r.runtime as f64);
             out.push_str(",\"heat\":");
             json_num(out, r.heat as f64);
+            if self.has_gpu {
+                out.push_str(",\"gpu\":");
+                json_num(out, r.gpu.unwrap_or(0.0) as f64);
+                out.push_str(",\"vram\":");
+                json_num(out, r.vram.unwrap_or(0) as f64);
+            }
             if let Some(why) = self.kill_blocker(r.pid, &r.name) {
                 out.push_str(",\"locked\":");
                 json_str(out, why);
@@ -936,18 +1017,17 @@ fn sys_cand(rule: u16, name: &str, metric: Metric, value: f64, limit: f64, mem: 
 }
 
 /// Evalúa los límites de una regla y devuelve el más comprometido.
-#[allow(clippy::too_many_arguments)]
+/// `usage` = (mem, cpu %, gpu %, vram, segundos vivo).
 fn cand(
     rule: &crate::config::Rule,
     ri: usize,
     pid: u32,
     start: u64,
     name: &Arc<str>,
-    mem: u64,
-    cpu: f32,
-    runtime: u64,
+    usage: (u64, f32, f32, u64, u64),
     members: u32,
 ) -> Option<Cand> {
+    let (mem, cpu, gpu, vram, runtime) = usage;
     let mut best: Option<(Metric, f64, f64, f64)> = None;
     let mut consider = |m: Metric, v: f64, l: Option<f64>| {
         if let Some(l) = l.filter(|l| *l > 0.0) {
@@ -960,6 +1040,8 @@ fn cand(
     consider(Metric::Mem, mem as f64 / GB, rule.max_mem_gb);
     consider(Metric::Cpu, cpu as f64, rule.max_cpu_percent);
     consider(Metric::Runtime, runtime as f64 / 60.0, rule.max_runtime_min);
+    consider(Metric::Gpu, gpu as f64, rule.max_gpu_percent);
+    consider(Metric::Vram, vram as f64 / GB, rule.max_vram_gb);
     let (metric, value, limit, ratio) = best?;
     Some(Cand {
         key: Key { rule: ri as u16, pid, start },
@@ -1045,6 +1127,83 @@ fn step(
         }
     }
     Step::Nothing
+}
+
+/// Adaptadores que no son una tarjeta de verdad (render por software, VMs, escritorio remoto).
+fn is_real_gpu(g: &sysinfo::Gpu) -> bool {
+    let text = format!("{} {}", g.vendor().unwrap_or(""), g.model().unwrap_or("")).to_ascii_lowercase();
+    const FAKE: &[&str] = &[
+        "basic render", "basic display", "microsoft remote display", "llvmpipe", "softpipe",
+        "svga", "virtualbox", "vmware", "parallels", "qxl", "virtio", "hyper-v", "citrix", "teamviewer",
+    ];
+    !text.trim().is_empty() && !FAKE.iter().any(|f| text.contains(f))
+}
+
+/// Lectura de la(s) tarjeta(s) gráfica(s): datos simples que sí pueden viajar entre hilos.
+#[derive(Clone, Default)]
+pub struct GpuSnapshot {
+    /// Uso de la tarjeta más cargada (%).
+    pub usage: f32,
+    pub vram_used: u64,
+    pub vram_total: u64,
+    pub cards: Vec<GpuCard>,
+}
+
+#[derive(Clone, Default)]
+pub struct GpuCard {
+    pub name: String,
+    pub usage: f32,
+    pub used: u64,
+    pub total: u64,
+}
+
+/// Lector de GPU. Vive en el hilo del muestreo: en Windows y Linux `sysinfo::Gpus` guarda
+/// handles nativos que no deben cruzar hilos, así que el `Monitor` compartido solo recibe
+/// el `GpuSnapshot`.
+pub struct GpuProbe {
+    gpus: sysinfo::Gpus,
+    snap: GpuSnapshot,
+}
+
+impl GpuProbe {
+    /// `None` si la máquina no tiene tarjeta gráfica real: no se mide ni se muestra nada.
+    pub fn detect() -> Option<GpuProbe> {
+        let gpus = sysinfo::Gpus::new_with_refreshed_list().ok()?;
+        gpus.iter().any(is_real_gpu).then(|| GpuProbe { gpus, snap: GpuSnapshot::default() })
+    }
+
+    pub fn read(&mut self) -> GpuSnapshot {
+        self.gpus.refresh(false);
+        let s = &mut self.snap;
+        s.usage = 0.0;
+        s.vram_used = 0;
+        s.vram_total = 0;
+        let mut n = 0;
+        for c in self.gpus.iter().filter(|c| is_real_gpu(c)) {
+            let usage = c.usage().unwrap_or(0.0);
+            let (used, total) = (c.used_memory().unwrap_or(0), c.total_memory().unwrap_or(0));
+            s.usage = s.usage.max(usage);
+            s.vram_used += used;
+            s.vram_total += total;
+            if s.cards.len() <= n {
+                // El nombre se copia una sola vez por tarjeta.
+                s.cards.push(GpuCard { name: c.model().or(c.vendor()).unwrap_or("GPU").to_string(), ..Default::default() });
+            }
+            let card = &mut s.cards[n];
+            card.usage = usage;
+            card.used = used;
+            card.total = total;
+            n += 1;
+        }
+        s.cards.truncate(n);
+        s.clone()
+    }
+}
+
+impl Monitor {
+    pub fn set_gpu(&mut self, snap: GpuSnapshot) {
+        self.gpu = Some(snap);
+    }
 }
 
 fn new_meta(p: &sysinfo::Process) -> Meta {
@@ -1150,7 +1309,7 @@ mod tests {
     fn cand_picks_worst_limit() {
         let r = rule("[[rule]]\nname='x'\nmax_mem_gb=4\nmax_runtime_min=40\n");
         let n: Arc<str> = Arc::from("bun.exe");
-        let c = cand(&r, 0, 1, 1, &n, (3.1 * GB) as u64, 0.0, 43 * 60, 1).unwrap();
+        let c = cand(&r, 0, 1, 1, &n, ((3.1 * GB) as u64, 0.0, 0.0, 0, 43 * 60), 1).unwrap();
         assert!(c.metric == Metric::Runtime && (c.value - 43.0).abs() < 1e-9 && c.limit == 40.0);
     }
 
@@ -1168,9 +1327,9 @@ mod tests {
     /// Sin app propia, se hereda la del ancestro más cercano.
     #[test]
     fn app_inherited_from_ancestor() {
-        let mut m = Monitor::new(Config::parse("").unwrap(), EventLog::new(None));
+        let mut m = Monitor::new(Config::parse("").unwrap(), EventLog::new(None), false);
         let row = |pid, ppid| Row {
-            pid, ppid, start: 1, cpu: 0.0, mem: 0, runtime: 0,
+            pid, ppid, start: 1, cpu: 0.0, mem: 0, runtime: 0, gpu: None, vram: None,
             name: Arc::from("x"), cmd: Arc::from(""), mask: 0, heat: 0.0,
         };
         let meta = |app: Option<&str>| Meta {
@@ -1192,6 +1351,23 @@ mod tests {
     }
 
     #[test]
+    fn gpu_rule() {
+        let r = rule("[[rule]]\nname='x'\nmax_vram_gb=6\nmax_gpu_percent=99\n");
+        let n: Arc<str> = Arc::from("python.exe");
+        let c = cand(&r, 0, 1, 1, &n, (GB as u64, 10.0, 40.0, (7.5 * GB) as u64, 60), 1).unwrap();
+        assert!(c.metric == Metric::Vram && c.ratio >= 1.0);
+        assert_eq!(c.metric.fmt(c.value), "7.5 GB");
+    }
+
+    #[test]
+    fn no_gpu_no_json() {
+        let m = Monitor::new(Config::parse("").unwrap(), EventLog::new(None), false);
+        let mut s = String::new();
+        m.write_summary(&mut s);
+        assert!(!s.contains("\"gpu\""), "sin tarjeta no debe aparecer nada de GPU");
+    }
+
+    #[test]
     fn masks() {
         let needles = vec![None, Some("vitest".to_string()), Some("node".into())];
         assert_eq!(mask_for("bun.exe\nbun x vitest run", &needles), 0b011);
@@ -1204,7 +1380,7 @@ mod tests {
             "[[rule]]\nname='Vitest'\nmatch='vitest'\ninclude_children=true\nmax_mem_gb=4\n",
         )
         .unwrap();
-        let mut m = Monitor::new(cfg, EventLog::new(None));
+        let mut m = Monitor::new(cfg, EventLog::new(None), false);
         m.dry_run = true;
         let row = |pid, ppid, mem_gb: f64, mask| Row {
             pid,
@@ -1212,7 +1388,7 @@ mod tests {
             start: 1,
             cpu: 10.0,
             mem: (mem_gb * GB) as u64,
-            runtime: 60,
+            runtime: 60, gpu: None, vram: None,
             name: Arc::from("bun"),
             cmd: Arc::from(""),
             mask,

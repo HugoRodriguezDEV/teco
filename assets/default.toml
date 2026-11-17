@@ -17,6 +17,8 @@ protected = ["kernel_task", "launchd", "WindowServer", "loginwindow",
 max_mem_percent = 90      # RAM total del equipo
 max_swap_gb = 8
 max_cpu_percent = 95      # CPU global sostenida
+max_vram_percent = 95     # memoria de video (solo si hay tarjeta gráfica)
+# max_gpu_percent = 98    # uso de GPU sostenido (los modelos de IA la usan al 100 % a propósito)
 for_secs = 60
 
 [[rule]]
@@ -39,3 +41,11 @@ match = "*"
 max_cpu_percent = 100     # por proceso; sysinfo puede pasar de 100 en multinúcleo
 for_secs = 300
 action = "alert"
+
+# Por proceso también se pueden vigilar la GPU (solo Windows) y su memoria:
+# [[rule]]
+# name = "Modelo comiéndose la VRAM"
+# match = "*"
+# max_vram_gb = 6
+# for_secs = 60
+# action = "alert"

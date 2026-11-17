@@ -67,6 +67,9 @@ pub struct SystemLimits {
     pub max_mem_percent: Option<f64>,
     pub max_swap_gb: Option<f64>,
     pub max_cpu_percent: Option<f64>,
+    /// Tarjeta gráfica (solo si la máquina tiene una): uso y memoria de video.
+    pub max_gpu_percent: Option<f64>,
+    pub max_vram_percent: Option<f64>,
     #[serde(default)]
     pub for_secs: u64,
     #[serde(default = "d_cooldown")]
@@ -91,6 +94,9 @@ pub struct Rule {
     pub max_mem_gb: Option<f64>,
     pub max_cpu_percent: Option<f64>,
     pub max_runtime_min: Option<f64>,
+    /// GPU por proceso (Windows): % de uso y memoria de video.
+    pub max_gpu_percent: Option<f64>,
+    pub max_vram_gb: Option<f64>,
     #[serde(default)]
     pub for_secs: u64,
     #[serde(default = "d_cooldown")]
@@ -133,6 +139,8 @@ impl Rule {
     }
     pub fn has_limits(&self) -> bool {
         self.max_mem_gb.is_some() || self.max_cpu_percent.is_some() || self.max_runtime_min.is_some()
+            || self.max_gpu_percent.is_some()
+            || self.max_vram_gb.is_some()
     }
 }
 
@@ -146,7 +154,7 @@ impl Config {
         for r in &c.rules {
             if !r.has_limits() {
                 return Err(format!(
-                    "la regla \"{}\" no tiene límites (max_mem_gb, max_cpu_percent o max_runtime_min)",
+                    "la regla \"{}\" no tiene límites (max_mem_gb, max_cpu_percent, max_runtime_min, max_gpu_percent o max_vram_gb)",
                     r.name
                 ));
             }
