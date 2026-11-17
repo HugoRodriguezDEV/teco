@@ -76,6 +76,7 @@ tr.near td{background:var(--warn-bg)}tr.over td{background:var(--bad-bg)}
 tr.near td:first-child{box-shadow:inset 3px 0 var(--warn)}tr.over td:first-child{box-shadow:inset 3px 0 var(--bad)}
 .kill{font:inherit;font-size:12px;border:1px solid var(--line);background:transparent;color:var(--bad);border-radius:6px;padding:3px 9px;cursor:pointer}
 .kill:hover{background:var(--bad-bg)}
+.kill.armed{outline:2px solid var(--bad);outline-offset:1px}
 .kill.force{background:var(--bad);border-color:var(--bad);color:#fff}.kill.force:hover{filter:brightness(1.08)}
 td .kill+.kill{margin-left:4px}
 .alert .acts{display:inline-flex;gap:6px;margin-left:10px;vertical-align:middle}.kill:disabled{color:var(--mute);cursor:not-allowed;background:none}
@@ -283,16 +284,32 @@ function toast(msg) {
 }
 // Detener = cierre ordenado (SIGTERM y, si no responde en 5 s, SIGKILL); Matar = inmediato.
 // En Windows los dos usan TerminateProcess. Con tree=1 se incluye a los procesos hijos.
+// Confirmación dentro del botón (las ventanas de la app no muestran confirm()):
+// primer clic = "¿Seguro?", segundo clic dentro de 4 s = se ejecuta.
+const armed = {key: "", until: 0};
 function killButtons(pid, start, name, tree) {
   const data = ' data-pid="' + pid + '" data-start="' + start + '" data-name="' + esc(name) + '" data-tree="' + (tree ? 1 : 0) + '"';
-  return '<button class="kill" data-force="0"' + data + ' title="Pide al proceso que cierre; si no responde en 5 s, se fuerza">Detener</button> '
-    + '<button class="kill force" data-force="1"' + data + ' title="Lo cierra de inmediato">Matar</button>';
+  const btn = (force, cls, label, title) => {
+    const on = armed.key === pid + "|" + force && Date.now() < armed.until;
+    return '<button class="kill' + cls + (on ? " armed" : "") + '" data-force="' + force + '"' + data + ' title="' + title + '">'
+      + (on ? "¿Seguro? " + label : label) + '</button>';
+  };
+  return btn(0, "", "Detener", "Pide al proceso que cierre; si no responde en 5 s, se fuerza") + " "
+    + btn(1, " force", "Matar", "Lo cierra de inmediato");
 }
 document.addEventListener("click", async e => {
   const b = e.target.closest("button.kill");
   if (!b || b.disabled || !b.dataset.pid) return;
   const v = b.dataset, force = v.force === "1", tree = v.tree === "1";
-  if (!confirm((force ? "¿Matar " : "¿Detener ") + v.name + " (" + v.pid + ")" + (tree ? " y sus procesos hijos" : "") + "?")) return;
+  const key = v.pid + "|" + v.force;
+  if (armed.key !== key || Date.now() > armed.until) {
+    armed.key = key; armed.until = Date.now() + 4000;
+    toast((force ? "Matar " : "Detener ") + v.name + " (" + v.pid + ")" + (tree ? " y sus procesos hijos" : "")
+      + ": haz clic otra vez para confirmar.");
+    if (st.last) { render(st.last); setTimeout(() => st.last && render(st.last), 4100); }
+    return;
+  }
+  armed.key = "";
   b.disabled = true;
   try {
     const r = await fetch("/api/kill", {method: "POST", headers: {"X-Teco": "1", "Content-Type": "application/x-www-form-urlencoded"},
