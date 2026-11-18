@@ -126,6 +126,19 @@ else
   fi
 fi
 
+# Tailscale solo en la barra de menú, sin ícono en el Dock (ajuste propio de la app de Tailscale).
+if [[ -d "$TS_APP" ]]; then
+  ts_id="$(defaults read "$TS_APP/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || true)"
+  if [[ "$ts_id" == io.tailscale.ipn.* ]]; then
+    if [[ "$(defaults read "$ts_id" HideDockIcon 2>/dev/null || true)" == 1 ]]; then
+      skip "Tailscale ya oculto del Dock"
+    else
+      defaults write "$ts_id" HideDockIcon -bool true
+      skip "Tailscale oculto del Dock (aplica al reabrir Tailscale)"
+    fi
+  fi
+fi
+
 # ---------------------------------------------------------------- tailscale serve
 say "Publicación en la tailnet (https:$SERVE_HTTPS_PORT → $SERVE_TARGET)"
 if "$TS" serve status 2>/dev/null | grep -q "${SERVE_TARGET#http://}"; then

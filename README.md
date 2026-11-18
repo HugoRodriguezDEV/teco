@@ -171,6 +171,7 @@ Una sola corrida deja todo listo:
 - **Binario:** se descarga del Release `teco-latest` y se verifica su huella SHA-256. No hace falta Rust ni iniciar sesión en GitHub.
 - **`teco.toml`:** se crea con los valores por defecto si no existe; una configuración existente se respeta. Las otras máquinas de tu tailnet aparecen solas en Dispositivos.
 - **Zotz:** en Windows, si está instalado, lo publica también en el puerto 8443 de tu tailnet.
+- **Tailscale sin Dock (macOS):** deja activado `HideDockIcon` en la app de Tailscale, para que viva solo en la barra de menú.
 
 ### Instalación desatendida en tu propia red (opcional)
 
